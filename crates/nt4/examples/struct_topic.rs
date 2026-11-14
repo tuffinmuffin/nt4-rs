@@ -50,8 +50,9 @@ async fn main() {
         PublishOptions::default(),
     );
 
-    for i in 0.. {
-        let angle = f64::from(i) * 0.05;
+    let mut angle: f64 = 0.0;
+    loop {
+        angle += 0.05;
         target
             .set(Value::Raw(translation2d(
                 2.0 * angle.cos(),

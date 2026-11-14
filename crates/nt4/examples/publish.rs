@@ -38,7 +38,8 @@ async fn main() {
     }
 
     let mut ticker = tokio::time::interval(Duration::from_millis(20));
-    for i in 0i64.. {
+    let mut i: i64 = 0;
+    loop {
         ticker.tick().await;
         let t = i as f64 * 0.02;
         wave.set(gain.get_or(1.0) * t.sin());
@@ -46,5 +47,6 @@ async fn main() {
             counter.set(i / 50);
             println!("t = {t:.0} s, gain = {}", gain.get_or(1.0));
         }
+        i += 1;
     }
 }
