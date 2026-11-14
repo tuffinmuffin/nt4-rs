@@ -29,6 +29,18 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # nt4-proto and nt4-core must stay free of sockets and runtimes so they
+  # build for the browser.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p nt4-proto -p nt4-core --target wasm32-unknown-unknown
+
   test:
     strategy:
       fail-fast: false
@@ -49,7 +61,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
-  # Every ntcore wire test case is ported or listed as not applicable.
+  # Every tracked ntcore test case is ported or listed as not applicable.
   upstream-audit:
     runs-on: ubuntu-latest
     steps:
@@ -70,4 +82,4 @@ jobs:
           git fetch -q --depth 1 --filter=blob:none origin main
           git checkout -q FETCH_HEAD
           cd ..
-          python3 scripts/upstream_audit.py allwpilib || echo "::warning::ntcore main has wire test changes not ported yet"
+          python3 scripts/upstream_audit.py allwpilib || echo "::warning::ntcore main has test changes not ported yet"

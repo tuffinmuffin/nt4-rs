@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/nt4-proto"]
+members = ["crates/nt4-proto", "crates/nt4-core"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,16 @@
+[package]
+name = "nt4-core"
+description = "NetworkTables 4.1 client state machine with no sockets (sans-I/O): announcements, publish/subscribe, time sync, reconnect replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+nt4-proto = { path = "../nt4-proto", version = "0.1.0" }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

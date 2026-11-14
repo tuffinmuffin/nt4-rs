@@ -10,12 +10,12 @@ MessagePack binary frames for values. The protocol is described in
 
 ## Status
 
-Milestone 1 of 6: the wire format.
+Milestone 2 of 6: the wire format and the client core.
 
 | Crate | What it does | Status |
 | --- | --- | --- |
 | `nt4-proto` | JSON and MessagePack encode/decode, value and type definitions. No I/O. | Done |
-| `nt4-core` | Client and server state machines with no sockets (sans-I/O) | Milestones 2 and 4 |
+| `nt4-core` | Client and server state machines with no sockets (sans-I/O) | Client done; server in milestone 4 |
 | `nt4` | tokio runtime: `client` and `server` features | Milestones 3 and 5 |
 
 The full plan, including how conformance is tested, is in the
@@ -27,13 +27,24 @@ The tests are checked against WPILib's own ntcore, in three layers:
 
 1. **Ported ntcore tests.** `crates/nt4-proto/tests/wire_encoder.rs` and
    `wire_decoder.rs` port every case of ntcore's `WireEncoderTest` and
-   `WireDecoderTest`, with the same bytes, JSON and warning text. Each test
-   names the upstream case it ports in an `// upstream: "..."` comment.
+   `WireDecoderTest`, with the same bytes, JSON and warning text.
+   `crates/nt4-core/tests/` ports `NetworkOutgoingQueueTest` and the client
+   cases of `TimeSyncTest`. Each test names the upstream case it ports in an
+   `// upstream: "..."` comment.
 2. **Upstream audit.** `scripts/upstream_audit.py <allwpilib checkout>` lists
    upstream cases that aren't ported yet. CI runs it against the pinned
    allwpilib commit (blocking) and against allwpilib `main` (warning only).
 3. **Interop with real ntcore** (milestone 3 onward): CI runs our client and
    server against ntcore from the `pyntcore` Python package.
+
+## Using the client core
+
+`nt4-core`'s `ClientCore` is the NT4 client with no socket and no clock: you
+open the WebSocket, feed it frames and the time, and send the frames it
+returns. It handles announcements, publish and subscribe, time sync,
+keepalive, and sends publishers, last values and subscriptions again after a
+reconnect. The tokio client in milestone 3 wraps it. See the crate docs
+(`cargo doc -p nt4-core --open`) for an example.
 
 ## Development
 
@@ -47,4 +58,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 MIT, see [LICENSE](LICENSE). Test vectors ported from allwpilib stay under
 WPILib's BSD license; see
-[crates/nt4-proto/tests/LICENSE-WPILIB.md](crates/nt4-proto/tests/LICENSE-WPILIB.md).
+`LICENSE-WPILIB.md` in each crate's `tests/` folder.

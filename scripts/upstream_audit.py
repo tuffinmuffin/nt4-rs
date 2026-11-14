@@ -20,17 +20,23 @@ import sys
 TRACKED = [
     "ntcore/src/test/native/cpp/net/WireEncoderTest.cpp",
     "ntcore/src/test/native/cpp/net/WireDecoderTest.cpp",
+    "ntcore/src/test/native/cpp/net/NetworkOutgoingQueueTest.cpp",
+    "ntcore/src/test/native/cpp/TimeSyncTest.cpp",
 ]
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-CASE = re.compile(r'TEST_CASE(?:_METHOD)?\s*\((?:[^,"]*,)?\s*"([^"]+)"', re.S)
+# The name may be split into adjacent string literals ("a " "b"), which C++
+# joins; capture all of them.
+CASE = re.compile(r'TEST_CASE(?:_METHOD)?\s*\((?:[^,"]*,)?\s*((?:"[^"]*"\s*)+)', re.S)
+LITERAL = re.compile(r'"([^"]*)"')
 MARKER = re.compile(r'//\s*upstream:\s*"([^"]+)"')
 
 
 def upstream_cases(allwpilib: pathlib.Path) -> set[str]:
     names = set()
     for rel in TRACKED:
-        names |= set(CASE.findall((allwpilib / rel).read_text()))
+        for literals in CASE.findall((allwpilib / rel).read_text()):
+            names.add("".join(LITERAL.findall(literals)))
     return names
 
 
