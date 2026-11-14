@@ -17,11 +17,17 @@ is vague, match ntcore's behavior (allwpilib `ntcore/src/main/native/cpp/`).
 - `crates/nt4-proto`: wire format only (JSON text frames, MessagePack binary
   frames, `NtType`, `Value`). No I/O, no async, no tokio, so it stays usable
   from WASM.
-- Planned: `nt4-core` (sans-I/O client and server state machines, same rule),
-  `nt4` (tokio runtime with `client` and `server` features).
+- `crates/nt4-core`: sans-I/O state machines, same no-I/O rule (CI builds it
+  for `wasm32-unknown-unknown`). `ClientCore` (client), `TimeSync`, and
+  `OutgoingQueue` (ntcore's `NetworkOutgoingQueue`, shared with the server
+  core later). Callers pass the time in microseconds; nothing reads a clock.
+- Planned: `ServerCore` in `nt4-core`, and `nt4` (tokio runtime with
+  `client` and `server` features).
 
 ## Rules
 
+- Where ntcore has a bug, don't copy it: do the sensible thing and say so in
+  a comment (e.g. the NT 4.0 RTT keepalive in `client.rs`).
 - Encoders must match ntcore byte for byte; decoders accept and reject the
   same input as ntcore, with ntcore's warning text.
 - Timestamps are integer microseconds, as on the wire. (ntcore 2027 uses
