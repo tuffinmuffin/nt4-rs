@@ -1,8 +1,7 @@
 # nt4-rs
 
-A NetworkTables 4.1 library for Rust, with both a client and a server, written
-for FRC Team 3200 (Raptacon) and its [raptaboard](https://github.com/tuffinmuffin/raptaboard)
-dashboard.
+A NetworkTables 4.1 library for Rust, with both a client and a server, so Rust
+programs can talk to WPILib robot code, dashboards and coprocessors.
 
 NetworkTables (NT) is how FRC robot code, dashboards and coprocessors share
 values. NT4 runs over a WebSocket: JSON text frames for control messages,

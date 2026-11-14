@@ -48,12 +48,12 @@ pub const ROBOT_CODE_PORT: u16 = 5810;
 /// Topic id used in binary frames for time sync (RTT) pings and replies.
 pub const RTT_ID: i32 = -1;
 
-/// Build the WebSocket URL a client connects to, e.g. `ws://10.32.0.2:5810/nt/raptaboard`.
+/// Build the WebSocket URL a client connects to, e.g. `ws://10.32.0.2:5810/nt/my-client`.
 ///
 /// ```
 /// assert_eq!(
-///     nt4_proto::client_url("10.32.0.2", 5810, "raptaboard"),
-///     "ws://10.32.0.2:5810/nt/raptaboard"
+///     nt4_proto::client_url("10.32.0.2", 5810, "my-client"),
+///     "ws://10.32.0.2:5810/nt/my-client"
 /// );
 /// ```
 pub fn client_url(host: &str, port: u16, client_name: &str) -> String {

@@ -4,9 +4,9 @@ Guidance for Claude Code working in this repository.
 
 ## Project
 
-nt4-rs is a NetworkTables 4.1 (NT4) client and server library in Rust for FRC
-Team 3200 (Raptacon). Its first user is the raptaboard dashboard
-(tuffinmuffin/raptaboard). The plan and milestones are in the project plan doc
+nt4-rs is a general-purpose NetworkTables 4.1 (NT4) client and server library
+in Rust, filling the gap for Rust programs that talk to WPILib. Keep it
+independent of any one app. The plan and milestones are in the project plan doc
 linked from README.md.
 
 Protocol reference: allwpilib `ntcore/doc/networktables4.adoc`. Where the spec
