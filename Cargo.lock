@@ -219,6 +219,7 @@ dependencies = [
  "nt4-proto",
  "serde_json",
  "thiserror",
+ "tungstenite",
 ]
 
 [[package]]

@@ -29,6 +29,15 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # The crates still package and build from what crates.io would get.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo publish --workspace --dry-run
+
   # nt4-proto and nt4-core must stay free of sockets and runtimes so they
   # build for the browser.
   wasm:

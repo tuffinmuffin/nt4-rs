@@ -59,3 +59,8 @@ pub const RTT_ID: i32 = -1;
 pub fn client_url(host: &str, port: u16, client_name: &str) -> String {
     format!("ws://{host}:{port}/nt/{client_name}")
 }
+
+// Compile and run the code in README.md as doc tests.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;

@@ -35,3 +35,16 @@ pub use client::{
 pub use nt4_core::{ClientError, Event, ProtocolVersion, PublishOptions, TopicValue};
 pub use nt4_proto::{NtType, Properties, SubscriptionOptions, Value};
 pub use typed::NtValue;
+
+/// The wire format crate, [`nt4_proto`], for constants such as
+/// [`ROBOT_CODE_PORT`](nt4_proto::ROBOT_CODE_PORT) and lower-level types.
+pub use nt4_proto as proto;
+
+/// The sans-I/O protocol crate, [`nt4_core`], for driving the protocol
+/// yourself.
+pub use nt4_core as core;
+
+// Compile and run the code in README.md as doc tests.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;

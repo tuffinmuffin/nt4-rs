@@ -49,3 +49,8 @@ pub use client::{
     TopicValue, Transmit,
 };
 pub use time_sync::{TimeSync, TimeSyncUpdate};
+
+// Compile and run the code in README.md as doc tests.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;

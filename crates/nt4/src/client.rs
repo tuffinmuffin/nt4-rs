@@ -165,6 +165,15 @@ impl std::fmt::Debug for Client {
 impl Client {
     /// Start the client. Must be called inside a tokio runtime; it spawns
     /// the connection task and returns at once.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// // Port 1 has no server: handles work before any connection.
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// assert!(!client.is_connected());
+    /// # }
+    /// ```
     pub fn start(config: ClientConfig) -> Self {
         let (events, _) = broadcast::channel(1024);
         let shared = Arc::new(Shared {
@@ -185,6 +194,16 @@ impl Client {
     }
 
     /// Publish a typed topic.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// // Port 1 has no server: handles work before any connection.
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// let speed = client.publish::<f64>("/robot/speed", Default::default());
+    /// speed.set(1.5); // sent once connected
+    /// # }
+    /// ```
     pub fn publish<T: NtValue>(&self, name: &str, options: PublishOptions) -> Publisher<T> {
         Publisher {
             inner: self.publish_generic(name, T::nt_type(), Properties::new(), options),
@@ -194,6 +213,19 @@ impl Client {
 
     /// Publish a topic with any type string and initial properties, for
     /// structs (`struct:Pose2d`) and other raw types.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// // Port 1 has no server: handles work before any connection.
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// use nt4::{NtType, Properties, Value};
+    /// let ty = NtType::Struct { name: "Translation2d".into(), array: false };
+    /// let target = client.publish_generic("/target", ty, Properties::new(), Default::default());
+    /// let bytes = [1.0f64.to_le_bytes(), 2.0f64.to_le_bytes()].concat();
+    /// target.set(Value::Raw(bytes)).unwrap();
+    /// # }
+    /// ```
     pub fn publish_generic(
         &self,
         name: &str,
@@ -213,6 +245,16 @@ impl Client {
     }
 
     /// Subscribe to one topic and keep its latest value.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// // Port 1 has no server: handles work before any connection.
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// let speed = client.subscribe::<f64>("/robot/speed", Default::default());
+    /// println!("{}", speed.get_or(0.0)); // 0.0 until a value arrives
+    /// # }
+    /// ```
     pub fn subscribe<T: NtValue>(&self, name: &str, options: SubscriptionOptions) -> Subscriber<T> {
         let mut state = self.shared.lock();
         let id = state.core.subscribe(vec![name.to_owned()], options);
@@ -236,6 +278,18 @@ impl Client {
 
     /// Subscribe to several topics or prefixes (with `options.prefix`).
     /// Values arrive as [`Event::Value`] on [`events`](Self::events).
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// // Port 1 has no server: handles work before any connection.
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// use nt4::SubscriptionOptions;
+    /// let options = SubscriptionOptions { prefix: true, ..Default::default() };
+    /// let _sub = client.subscribe_multiple(vec!["/SmartDashboard/".into()], options);
+    /// let mut events = client.events(); // values arrive here as Event::Value
+    /// # }
+    /// ```
     pub fn subscribe_multiple(
         &self,
         topics: Vec<String>,

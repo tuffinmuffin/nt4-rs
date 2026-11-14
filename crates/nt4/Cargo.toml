@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/nt4"
+readme = "README.md"
+keywords = ["frc", "networktables", "wpilib", "nt4", "robotics"]
+categories = ["network-programming", "asynchronous", "science::robotics"]
 
 [features]
 default = ["client"]
@@ -22,6 +27,9 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 [dev-dependencies]
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
 serde_json.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lints]
 workspace = true

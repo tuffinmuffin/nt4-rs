@@ -75,6 +75,19 @@ every announcement, value and time sync change.
 Under the hood, `nt4-core`'s `ClientCore` is the protocol with no socket and
 no clock, so it can be driven from any runtime or from WASM.
 
+## Releasing
+
+The three crates share one version (workspace `version`) and are published
+together:
+
+1. Update `CHANGELOG.md`, and bump `version` in the root `Cargo.toml` and on
+   each `nt4-proto` / `nt4-core` path dependency.
+2. `cargo publish --workspace --dry-run`, then `cargo publish --workspace`
+   (Cargo publishes `nt4-proto`, `nt4-core`, `nt4` in dependency order).
+3. Tag the release `v<version>`.
+
+CI runs the dry run on every push, so packaging problems show up early.
+
 ## Development
 
 ```bash
