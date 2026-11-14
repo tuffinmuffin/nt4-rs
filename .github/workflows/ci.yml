@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # allwpilib commit the ported tests come from. Bump it together with the tests.
+  ALLWPILIB_COMMIT: 4ccfe967ba1903b1f409b04b99db0922dd3b7318
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # Every ntcore wire test case is ported or listed as not applicable.
+  upstream-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch ntcore tests at the pinned commit
+        run: |
+          git init -q allwpilib
+          cd allwpilib
+          git remote add origin https://github.com/wpilibsuite/allwpilib.git
+          git sparse-checkout set --no-cone /ntcore/src/test/
+          git fetch -q --depth 1 --filter=blob:none origin "$ALLWPILIB_COMMIT"
+          git checkout -q FETCH_HEAD
+      - run: python3 scripts/upstream_audit.py allwpilib
+      - name: Compare with allwpilib main (informational)
+        continue-on-error: true
+        run: |
+          cd allwpilib
+          git fetch -q --depth 1 --filter=blob:none origin main
+          git checkout -q FETCH_HEAD
+          cd ..
+          python3 scripts/upstream_audit.py allwpilib || echo "::warning::ntcore main has wire test changes not ported yet"

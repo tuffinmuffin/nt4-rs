@@ -1,0 +1,3 @@
+# ntcore test cases that don't apply to this crate, one per line, with why.
+WireEncoderTextTest ServerMessageEmpty   # Rust enums can't be empty
+WireEncoderTextTest ServerMessageValue   # values are binary frames, not a text message variant

@@ -1,0 +1,21 @@
+[package]
+name = "nt4-proto"
+description = "NetworkTables 4.1 wire format: JSON control messages and MessagePack value frames, with no I/O"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+rmpv.workspace = true
+rmp.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+rmpv.workspace = true
+
+[lints]
+workspace = true
