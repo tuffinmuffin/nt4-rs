@@ -1,0 +1,27 @@
+[package]
+name = "nt4"
+description = "NetworkTables 4.1 for tokio: a client that connects, reconnects and keeps time sync, with typed publishers and subscribers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["client"]
+## The NT4 client.
+client = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
+
+[dependencies]
+nt4-proto = { path = "../nt4-proto", version = "0.1.0" }
+nt4-core = { path = "../nt4-core", version = "0.1.0" }
+tokio = { version = "1.47", features = ["rt", "net", "time", "sync", "macros"], optional = true }
+tokio-tungstenite = { version = "0.30", optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

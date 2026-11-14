@@ -21,8 +21,12 @@ is vague, match ntcore's behavior (allwpilib `ntcore/src/main/native/cpp/`).
   for `wasm32-unknown-unknown`). `ClientCore` (client), `TimeSync`, and
   `OutgoingQueue` (ntcore's `NetworkOutgoingQueue`, shared with the server
   core later). Callers pass the time in microseconds; nothing reads a clock.
-- Planned: `ServerCore` in `nt4-core`, and `nt4` (tokio runtime with
-  `client` and `server` features).
+- `crates/nt4`: tokio runtime. `client` feature: `Client` (connect,
+  reconnect, frame pump around `ClientCore`) and typed `Publisher<T>` /
+  `Subscriber<T>` via `NtValue`. Interop tests in `tests/interop.rs` drive a
+  real ntcore through `tests/interop/ntcore_peer.py` (JSON lines on stdin);
+  they skip unless `NT4_INTEROP_PYTHON` points at a Python with pyntcore.
+- Planned: `ServerCore` in `nt4-core` and the `server` feature in `nt4`.
 
 ## Rules
 
@@ -48,4 +52,8 @@ cargo test --workspace
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 python3 scripts/upstream_audit.py <allwpilib checkout>
+NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --test interop
 ```
+
+ntcore facts learned from interop: the server always renames a client to
+`<name>@<n>`.
