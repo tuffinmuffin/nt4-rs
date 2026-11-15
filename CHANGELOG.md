@@ -28,6 +28,7 @@ First release.
   on the same bytes, and compares. Found and fixed: invalid UTF-8 in string
   values was rejected (ntcore accepts them, using replacement characters);
   `-0` integer literals were parsed as `-0.0` (ntcore treats them as 0); some
-  integer id fields above `i64::MAX` were not properly rejected. Also
+  integer id fields above `i64::MAX` were not properly rejected. JSON numbers
+  are now parsed exactly (serde_json's `float_roundtrip`), as ntcore does. Also
   discovered an ntcore crash: number overflow in JSON text frames
   (`1e400`, `-1e400`) causes ntcore to throw an unhandled C++ exception.

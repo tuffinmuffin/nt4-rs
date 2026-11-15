@@ -58,21 +58,20 @@ Cases where nt4 intentionally differs from ntcore:
 | Case | nt4 behavior | ntcore behavior | Why |
 | --- | --- | --- | --- |
 | JSON nested > 128 levels | rejects | accepts | Stack overflow risk; serde_json's default limit |
-| `periodic` out of range (negative, huge, ∞) | rejects with warning | accepts; converts to unsigned ms (UB) | Undefined behavior in ntcore |
-| Integers above `i64::MAX` | rejects as "out of range" | wraps (two's complement) | Wrapping is unspecified behavior in C++ |
+| `periodic` out of range (negative, huge, ∞) | rejects with warning | ntcore 2026 accepts it and converts to unsigned ms (undefined behavior) | ntcore 2027 rejects these too (allwpilib #9301) |
+| Integers above `i64::MAX` | rejects as "out of range" | ntcore 2026 reads them as negative (`18446744073709551615` becomes id -1) | A wrapped id is never what the sender meant |
 | `unsubscribe` bad uid error text | "subuid out of range" | "pubuid out of range" | ntcore has a typo |
 
 ## ntcore bug found
 
-Numbers like `1e400` or `-1e400` in JSON text frames cause ntcore to crash
-with an unhandled C++ exception (`json.exception.out_of_range`). The pyntcore
-wheel's `WireDecodeText` throws `std::out_of_range` from nlohmann JSON's
-integer overflow path and does not catch it, which terminates the process.
+ntcore 2026.2.2 ends its process on a text frame holding a number too large
+for a double, such as `[1e400]`. Its JSON parser throws `out_of_range`, and
+`WireDecodeText` only catches `parse_error`. This happens in a server and in a
+client. ntcore 2027 (alpha 8) uses a different JSON parser and is not
+affected. nt4-proto handles these frames.
 
-Reproduced by sending `[{"method":"announce","params":{"name":"","id":1,"type":"","pubuid":1e400,"properties":{}}}]`
-to an ntcore server. nt4-proto handles these frames without crashing.
-
-This should be reported to WPILib (allwpilib ntcore).
+The oracle catches the exception and reports it, so the fuzzer keeps running
+and lists these frames under "ntcore threw".
 
 ## Structure
 
