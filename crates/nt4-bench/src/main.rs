@@ -144,7 +144,7 @@ fn robot_value(ty: NtType, seq: i64) -> Value {
 }
 
 async fn run_robot(port: u16, seconds: f64, scale: usize) {
-    let client = Client::start(ClientConfig::server("nt4-robot", &host(), port));
+    let client = Client::start(ClientConfig::server("nt4-robot", host(), port));
     assert!(
         client.wait_for_sync(Duration::from_secs(10)).await,
         "no server"
@@ -266,7 +266,7 @@ async fn main() {
     let native = mode == "native";
 
     let t0 = Instant::now();
-    let mut config = ClientConfig::server("nt4-bench", &host(), port);
+    let mut config = ClientConfig::server("nt4-bench", host(), port);
     config.reconnect_delay = Duration::from_millis(100);
     let client = Client::start(config);
     if native {
