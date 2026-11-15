@@ -42,6 +42,15 @@ The tests are checked against WPILib's own ntcore, in three layers:
    `pyntcore` installed, and it skips without it. From milestone 5, CI also
    runs ntcore clients against our server.
 
+## Performance
+
+`bench/` runs nt4 and ntcore against a simulated robot (200 topics: one-time
+values, values set every 20 ms, and a busy loop), up to 1,640 topics and
+155,000 values/s. No run lost or reordered an update. With no per-value code
+in either, nt4 used less CPU than C++ ntcore (3.8% against 4.7% of a core at
+1,640 topics) and about 5 MiB of memory. See [bench/README.md](bench/README.md)
+for the setup and full results.
+
 ## Using the client
 
 ```toml

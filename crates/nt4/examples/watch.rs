@@ -33,26 +33,23 @@ async fn main() {
         },
     );
 
-    loop {
-        match events.recv().await {
-            Ok(Event::Connected { version }) => println!("connected ({version:?})"),
-            Ok(Event::Disconnected { reason }) => println!("disconnected: {reason}"),
-            Ok(Event::Announced { name, ty, .. }) => println!("+ {name} ({ty})"),
-            Ok(Event::Unannounced { name, .. }) => println!("- {name}"),
-            Ok(Event::Value { name, value, .. }) => {
+    while let Some(event) = events.recv().await {
+        match event {
+            Event::Connected { version } => println!("connected ({version:?})"),
+            Event::Disconnected { reason } => println!("disconnected: {reason}"),
+            Event::Announced { name, ty, .. } => println!("+ {name} ({ty})"),
+            Event::Unannounced { name, .. } => println!("- {name}"),
+            Event::Value { name, value, .. } => {
                 println!("{name} = {:?} @ {} us", value.value, value.server_time_us)
             }
-            Ok(Event::TimeSync(t)) if t.valid => {
+            Event::TimeSync(t) if t.valid => {
                 println!(
                     "server clock offset {} us (rtt/2 {} us)",
                     t.server_time_offset_us, t.rtt2_us
                 )
             }
-            Ok(Event::Warning(w)) => eprintln!("warning: {w}"),
-            Ok(_) => {}
-            // Printing fell behind; some events were skipped.
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => eprintln!("(skipped {n})"),
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            Event::Warning(w) => eprintln!("warning: {w}"),
+            _ => {}
         }
     }
 }

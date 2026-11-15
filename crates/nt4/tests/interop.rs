@@ -176,7 +176,7 @@ async fn prefix_subscription_sees_announcements() {
 
     let got = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let Ok(Event::Value { name, value, .. }) = events.recv().await {
+            if let Some(Event::Value { name, value, .. }) = events.recv().await {
                 return (name, value.value);
             }
         }

@@ -213,6 +213,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nt4-bench"
+version = "0.1.0"
+dependencies = [
+ "nt4",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "nt4-core"
 version = "0.1.0"
 dependencies = [

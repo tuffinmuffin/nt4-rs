@@ -31,11 +31,11 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use nt4_core::{
-    ClientCore, ClientError, Event, ProtocolVersion, PubId, PublishOptions, SubId, TopicValue,
-    Transmit,
+    ClientCore, ClientError, Event, ProtocolVersion, PubId, PublishOptions, SubId, Topic,
+    TopicValue, Transmit,
 };
 use nt4_proto::{NtType, Properties, SubscriptionOptions, Value};
-use tokio::sync::{Notify, broadcast, watch};
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::{
     self, Message,
@@ -103,12 +103,16 @@ struct State {
     core: ClientCore,
     /// Latest value per subscribed topic name, for typed subscribers.
     watchers: HashMap<String, watch::Sender<Option<TopicValue>>>,
+    /// Queues for [`Client::events`] listeners.
+    listeners: Vec<mpsc::UnboundedSender<Event>>,
 }
 
 struct Shared {
     state: Mutex<State>,
-    events: broadcast::Sender<Event>,
     flush: Notify,
+    /// A publish, subscribe or property change is queued: send it without
+    /// waiting for the next tick.
+    wake: Notify,
     start: Instant,
 }
 
@@ -133,8 +137,8 @@ impl Shared {
             {
                 w.send_replace(Some(value.clone()));
             }
-            // No listeners is fine.
-            let _ = self.events.send(event);
+            // Drop listeners whose `Events` was dropped.
+            state.listeners.retain(|l| l.send(event.clone()).is_ok());
         }
     }
 }
@@ -175,14 +179,14 @@ impl Client {
     /// # }
     /// ```
     pub fn start(config: ClientConfig) -> Self {
-        let (events, _) = broadcast::channel(1024);
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 core: ClientCore::new(),
                 watchers: HashMap::new(),
+                listeners: Vec::new(),
             }),
-            events,
             flush: Notify::new(),
+            wake: Notify::new(),
             start: Instant::now(),
         });
         let (stop_tx, stop_rx) = watch::channel(false);
@@ -238,6 +242,7 @@ impl Client {
             .lock()
             .core
             .publish(name, ty, properties, options);
+        self.shared.wake.notify_one();
         GenericPublisher {
             shared: self.shared.clone(),
             id,
@@ -266,6 +271,7 @@ impl Client {
             .or_insert_with(|| watch::channel(current).0)
             .subscribe();
         drop(state);
+        self.shared.wake.notify_one();
         Subscriber {
             handle: SubscriptionHandle {
                 shared: self.shared.clone(),
@@ -296,6 +302,7 @@ impl Client {
         options: SubscriptionOptions,
     ) -> SubscriptionHandle {
         let id = self.shared.lock().core.subscribe(topics, options);
+        self.shared.wake.notify_one();
         SubscriptionHandle {
             shared: self.shared.clone(),
             id,
@@ -305,13 +312,18 @@ impl Client {
     /// Change a topic's properties on the server (`null` deletes one).
     pub fn set_properties(&self, name: &str, update: Properties) {
         self.shared.lock().core.set_properties(name, update);
+        self.shared.wake.notify_one();
     }
 
     /// Everything that happens from now on: connections, announcements,
-    /// values, time sync and warnings. A listener that falls more than 1024
-    /// events behind misses the oldest ones.
-    pub fn events(&self) -> broadcast::Receiver<Event> {
-        self.shared.events.subscribe()
+    /// values, time sync and warnings, in order and without gaps.
+    ///
+    /// Like ntcore's listener queues, the queue has no size limit: read it
+    /// steadily, or drop the [`Events`] to stop collecting.
+    pub fn events(&self) -> Events {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.shared.lock().listeners.push(tx);
+        Events { rx }
     }
 
     /// Send everything queued now instead of on the next period.
@@ -322,6 +334,38 @@ impl Client {
     /// Whether a server connection is open.
     pub fn is_connected(&self) -> bool {
         self.shared.lock().core.is_connected()
+    }
+
+    /// A topic the server announced, with its newest value, if any. Values
+    /// arrive only for topics a subscription covers.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// // Port 1 has no server, so nothing is announced.
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// assert!(client.topic("/robot/speed").is_none());
+    /// # }
+    /// ```
+    pub fn topic(&self, name: &str) -> Option<Topic> {
+        self.shared.lock().core.topic_by_name(name).cloned()
+    }
+
+    /// Every topic the server announced, with its newest value, in no set
+    /// order. Copies them all: for values as they arrive, use
+    /// [`events`](Self::events) or [`subscribe`](Self::subscribe).
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// for topic in client.topics() {
+    ///     println!("{} ({:?}): {:?}", topic.name, topic.ty, topic.value);
+    /// }
+    /// # }
+    /// ```
+    pub fn topics(&self) -> Vec<Topic> {
+        self.shared.lock().core.topics().cloned().collect()
     }
 
     /// Server time minus local time, in microseconds, once known.
@@ -352,10 +396,39 @@ impl Client {
             }
             match tokio::time::timeout_at(deadline, events.recv()).await {
                 Err(_) => return self.server_time_offset().is_some(),
-                Ok(Err(broadcast::error::RecvError::Closed)) => return false,
-                Ok(_) => {}
+                Ok(None) => return false,
+                Ok(Some(_)) => {}
             }
         }
+    }
+}
+
+/// The event queue from [`Client::events`].
+#[derive(Debug)]
+pub struct Events {
+    rx: mpsc::UnboundedReceiver<Event>,
+}
+
+impl Events {
+    /// The next event, waiting if there is none. `None` once the client
+    /// has stopped and every event has been read.
+    pub async fn recv(&mut self) -> Option<Event> {
+        self.rx.recv().await
+    }
+
+    /// The next event if one is waiting, without waiting.
+    pub fn try_recv(&mut self) -> Option<Event> {
+        self.rx.try_recv().ok()
+    }
+
+    /// How many events are waiting.
+    pub fn len(&self) -> usize {
+        self.rx.len()
+    }
+
+    /// Whether no events are waiting.
+    pub fn is_empty(&self) -> bool {
+        self.rx.is_empty()
     }
 }
 
@@ -391,6 +464,7 @@ impl GenericPublisher {
 impl Drop for GenericPublisher {
     fn drop(&mut self) {
         self.shared.lock().core.unpublish(self.id);
+        self.shared.wake.notify_one();
     }
 }
 
@@ -437,6 +511,7 @@ impl std::fmt::Debug for SubscriptionHandle {
 impl Drop for SubscriptionHandle {
     fn drop(&mut self) {
         self.shared.lock().core.unsubscribe(self.id);
+        self.shared.wake.notify_one();
     }
 }
 
@@ -546,7 +621,9 @@ async fn connect(url: &str) -> Result<(Ws, ProtocolVersion), tungstenite::Error>
         SEC_WEBSOCKET_PROTOCOL,
         HeaderValue::from_str(&protocols).expect("constant header is valid"),
     );
-    let (ws, response) = tokio_tungstenite::connect_async(request).await?;
+    // TCP_NODELAY, as ntcore does: values are small frames that should not
+    // wait for the previous one's ACK.
+    let (ws, response) = tokio_tungstenite::connect_async_with_config(request, None, true).await?;
     let version = response
         .headers()
         .get(SEC_WEBSOCKET_PROTOCOL)
@@ -613,6 +690,9 @@ async fn run_connection(
             _ = tokio::time::sleep_until(next_tick) => {
                 shared.lock().core.send_outgoing(shared.now_us(), false);
                 next_tick = Instant::now() + period;
+            }
+            _ = shared.wake.notified() => {
+                shared.lock().core.send_outgoing(shared.now_us(), false);
             }
             _ = shared.flush.notified() => {
                 shared.lock().core.send_outgoing(shared.now_us(), true);

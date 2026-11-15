@@ -29,10 +29,10 @@ pub mod typed;
 
 #[cfg(feature = "client")]
 pub use client::{
-    Client, ClientConfig, ClientStopped, GenericPublisher, Publisher, Subscriber,
+    Client, ClientConfig, ClientStopped, Events, GenericPublisher, Publisher, Subscriber,
     SubscriptionHandle,
 };
-pub use nt4_core::{ClientError, Event, ProtocolVersion, PublishOptions, TopicValue};
+pub use nt4_core::{ClientError, Event, ProtocolVersion, PublishOptions, Topic, TopicValue};
 pub use nt4_proto::{NtType, Properties, SubscriptionOptions, Value};
 pub use typed::NtValue;
 
