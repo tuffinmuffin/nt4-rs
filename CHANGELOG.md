@@ -14,7 +14,7 @@ First release.
   (port of ntcore's `NetworkOutgoingQueue`); ntcore's
   `NetworkOutgoingQueueTest` and the client cases of `TimeSyncTest` ported.
 - `nt4`: tokio `Client` with typed `Publisher<T>` / `Subscriber<T>`,
-  team-number server lookup, and interop tests against pyntcore 2026.2.2.
+  team-number server lookup, and interop tests against pyntcore 2027.0.0a8.
   `Client::events()` is lossless (an unbounded queue per reader, like
   ntcore's listener queues). `Client::topic` and `Client::topics` read the
   cached topics and values.
@@ -27,8 +27,12 @@ First release.
   Generates structure-aware frames, runs nt4-proto and ntcore's own decoders
   on the same bytes, and compares. Found and fixed: invalid UTF-8 in string
   values was rejected (ntcore accepts them, using replacement characters);
-  `-0` integer literals were parsed as `-0.0` (ntcore treats them as 0); some
-  integer id fields above `i64::MAX` were not properly rejected. JSON numbers
-  are now parsed exactly (serde_json's `float_roundtrip`), as ntcore does. Also
-  discovered an ntcore crash: number overflow in JSON text frames
-  (`1e400`, `-1e400`) causes ntcore to throw an unhandled C++ exception.
+  `-0` integer literals were parsed as `-0.0` (ntcore treats them as 0); JSON
+  numbers are now parsed exactly (serde_json's `float_roundtrip`), as ntcore
+  does; JSON nesting stops at 20 levels and the first of a repeated key wins,
+  as in ntcore; a binary timestamp that doesn't fit in nanoseconds is
+  rejected, as in ntcore. It also found an ntcore parser bug (a `null` member
+  after a repeated key takes the repeated key's value), which nt4 does not
+  copy.
+- ntcore 2027 only: the interop tests, the fuzzer oracle and the benchmark
+  use pyntcore 2027.0.0a8. ntcore 2026 behavior is not tracked.

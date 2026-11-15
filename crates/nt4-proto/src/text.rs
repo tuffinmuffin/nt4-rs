@@ -25,6 +25,7 @@
 
 use std::fmt::Write as _;
 
+use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_json::Value as Json;
 
 use crate::NtType;
@@ -317,9 +318,7 @@ fn decode_frame<M>(
         messages: Vec::new(),
         warnings: Vec::new(),
     };
-    // ntcore's JSON parser stops at a NUL as if the input ended there.
-    let text = text.split('\0').next().unwrap_or_default();
-    let json: Json = match serde_json::from_str(&negative_zero_as_integer(text)) {
+    let json = match parse_json(text) {
         Ok(j) => j,
         Err(e) => {
             out.warnings
@@ -354,6 +353,31 @@ fn decode_frame<M>(
         }
     }
     out
+}
+
+/// ntcore's JSON parser gives up below this many nested arrays and objects.
+const MAX_JSON_DEPTH: usize = 20;
+
+/// Parse a frame's JSON the way ntcore's parser reads it, where that differs
+/// from serde_json's defaults:
+///
+/// - nothing may sit inside more than [`MAX_JSON_DEPTH`] arrays and objects;
+/// - when an object repeats a key, the first value is kept;
+/// - `-0` is the integer 0, not the double -0.0.
+///
+/// ntcore's parser also accepts some input that isn't JSON; that is rejected
+/// here, as serde_json does.
+fn parse_json(text: &str) -> Result<Json, String> {
+    if too_deep(text) {
+        return Err("depth_exceeded".into());
+    }
+    let text = negative_zero_as_integer(text);
+    let mut de = serde_json::Deserializer::from_str(&text);
+    let json = FirstKeyWins
+        .deserialize(&mut de)
+        .map_err(|e| e.to_string())?;
+    de.end().map_err(|e| e.to_string())?;
+    Ok(json)
 }
 
 /// `text` with each `-0` number (not `-0.0`) written as `0`. ntcore's JSON
@@ -393,6 +417,105 @@ fn negative_zero_as_integer(text: &str) -> std::borrow::Cow<'_, str> {
     out.into()
 }
 
+/// Whether any value or key in `text` is inside more than
+/// [`MAX_JSON_DEPTH`] arrays and objects.
+fn too_deep(text: &str) -> bool {
+    let (mut depth, mut in_string, mut escaped) = (0usize, false, false);
+    for &c in text.as_bytes() {
+        if in_string {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            b' ' | b'\t' | b'\n' | b'\r' | b',' | b':' => continue,
+            b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                continue;
+            }
+            _ => {}
+        }
+        // Anything else starts a value or a key.
+        if depth >= MAX_JSON_DEPTH {
+            return true;
+        }
+        match c {
+            b'[' | b'{' => depth += 1,
+            b'"' => in_string = true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Deserializes any JSON into a [`Json`], see [`parse_json`].
+struct FirstKeyWins;
+
+impl<'de> DeserializeSeed<'de> for FirstKeyWins {
+    type Value = Json;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<Json, D::Error> {
+        d.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for FirstKeyWins {
+    type Value = Json;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("any JSON value")
+    }
+
+    fn visit_bool<E>(self, v: bool) -> Result<Json, E> {
+        Ok(Json::Bool(v))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Json, E> {
+        Ok(v.into())
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Json, E> {
+        Ok(v.into())
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Json, E> {
+        Ok(v.into())
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Json, E> {
+        Ok(Json::String(v.to_owned()))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Json, E> {
+        Ok(Json::String(v))
+    }
+
+    fn visit_unit<E>(self) -> Result<Json, E> {
+        Ok(Json::Null)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Json, A::Error> {
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element_seed(FirstKeyWins)? {
+            items.push(item);
+        }
+        Ok(Json::Array(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Json, A::Error> {
+        let mut object = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            let value = map.next_value_seed(FirstKeyWins)?;
+            object.entry(key).or_insert(value);
+        }
+        Ok(Json::Object(object))
+    }
+}
+
 fn get_string(params: &mut Params, key: &str) -> Result<String, String> {
     match params.remove(key) {
         None => Err(format!("no {key} key")),
@@ -410,13 +533,11 @@ fn get_id(params: &Params, key: &str, what: &str) -> Result<i32, String> {
     }
 }
 
-/// An id value. ntcore also takes integers above `i64::MAX` and wraps them
-/// (so `18446744073709551615` becomes -1, a valid id); that's a bug, so here
-/// they are out of range, as ntcore says for most of them.
+/// An id value. An integer above `i64::MAX` is a double by now (see
+/// [`parse_json`]), so it is "not a number" here, as in ntcore.
 fn id_value(v: &Json, not_a_number: &str, what: &str) -> Result<i32, String> {
     match v.as_i64() {
         Some(i) => id_range(i, what),
-        None if v.is_u64() => Err(format!("{what} out of range")),
         None => Err(not_a_number.to_owned()),
     }
 }

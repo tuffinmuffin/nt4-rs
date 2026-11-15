@@ -12,6 +12,7 @@ keywords = ["frc", "networktables", "wpilib", "nt4", "robotics"]
 categories = ["network-programming", "encoding", "science::robotics"]
 
 [dependencies]
+serde.workspace = true
 serde_json.workspace = true
 rmp.workspace = true
 thiserror.workspace = true

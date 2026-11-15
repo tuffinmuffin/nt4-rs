@@ -95,7 +95,8 @@ A server (`server` feature) is planned.
 
 ## Compatibility
 
-NT 4.1, with fallback to 4.0. Tested against ntcore 2026.2.2. Minimum Rust
+NT 4.1, with fallback to 4.0. Tested against ntcore 2027 (pyntcore 2027.0.0a8);
+ntcore 2026 and older are not tracked. Minimum Rust
 version 1.95.
 
 ## License

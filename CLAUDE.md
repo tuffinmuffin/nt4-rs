@@ -11,6 +11,8 @@ linked from README.md.
 
 Protocol reference: allwpilib `ntcore/doc/networktables4.adoc`. Where the spec
 is vague, match ntcore's behavior (allwpilib `ntcore/src/main/native/cpp/`).
+"ntcore" means ntcore 2027 and later (interop tests, fuzzer oracle and
+benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
 
 ## Layout
 
@@ -56,4 +58,5 @@ NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --test interop
 ```
 
 ntcore facts learned from interop: the server always renames a client to
-`<name>@<n>`.
+`<name>@<n>`. pyntcore 2027 uses snake_case names, has no NT3 port, and
+reports times in nanoseconds.

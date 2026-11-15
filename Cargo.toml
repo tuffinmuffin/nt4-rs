@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/nt4-proto", "crates/nt4-core", "crates/nt4", "crates/nt4-bench", "crates/nt4-fuzz"]
+members = ["crates/nt4-proto", "crates/nt4-core", "crates/nt4", "crates/nt4-bench", "crates/nt4-fuzz", "crates/nt4-perf"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ rust-version = "1.95"
 # float_roundtrip: parse numbers exactly, as ntcore does (the default parser
 # can be off by one in the last place).
 serde_json = { version = "1", features = ["float_roundtrip"] }
+serde = "1"
 rmpv = "1"
 rmp = "0.8"
 thiserror = "2"

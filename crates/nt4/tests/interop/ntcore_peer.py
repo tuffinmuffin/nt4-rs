@@ -5,7 +5,7 @@ on stdout. The Rust tests in tests/interop.rs drive it; run it by hand with
 `python -u ntcore_peer.py` and type commands to try it.
 
 Commands:
-  {"cmd": "start_server", "port4": 5810, "port3": 1735}
+  {"cmd": "start_server", "port": 5810}
   {"cmd": "stop_server"}
   {"cmd": "publish", "name": "/x", "type": "double", "value": 1.5}
   {"cmd": "subscribe", "name": "/x"}
@@ -13,7 +13,8 @@ Commands:
   {"cmd": "connections"}
   {"cmd": "now"}
 
-Written by Claude.
+Written by Claude. Uses the pyntcore 2027 API (snake_case names; times are
+nanoseconds there, reported here in microseconds as on the wire).
 """
 
 import json
@@ -27,17 +28,17 @@ publishers = {}
 subscribers = {}
 
 SETTERS = {
-    "boolean": "setBoolean",
-    "double": "setDouble",
-    "int": "setInteger",
-    "float": "setFloat",
-    "string": "setString",
-    "raw": "setRaw",
-    "boolean[]": "setBooleanArray",
-    "double[]": "setDoubleArray",
-    "int[]": "setIntegerArray",
-    "float[]": "setFloatArray",
-    "string[]": "setStringArray",
+    "boolean": "set_boolean",
+    "double": "set_double",
+    "int": "set_integer",
+    "float": "set_float",
+    "string": "set_string",
+    "raw": "set_raw",
+    "boolean[]": "set_boolean_array",
+    "double[]": "set_double_array",
+    "int[]": "set_integer_array",
+    "float[]": "set_float_array",
+    "string[]": "set_string_array",
 }
 
 
@@ -51,8 +52,8 @@ def to_json(v):
 
 def subscriber(name):
     if name not in subscribers:
-        subscribers[name] = inst.getTopic(name).genericSubscribe(
-            ntcore.PubSubOptions(sendAll=False)
+        subscribers[name] = inst.get_topic(name).generic_subscribe(
+            options=ntcore.PubSubOptions(send_all=False)
         )
     return subscribers[name]
 
@@ -60,15 +61,15 @@ def subscriber(name):
 def handle(cmd):
     c = cmd["cmd"]
     if c == "start_server":
-        inst.startServer("", "127.0.0.1", cmd["port3"], cmd["port4"])
+        inst.start_server("", "127.0.0.1", "", cmd["port"])
         return {"ok": True}
     if c == "stop_server":
-        inst.stopServer()
+        inst.stop_server()
         return {"ok": True}
     if c == "publish":
         name, ty = cmd["name"], cmd["type"]
         if name not in publishers:
-            publishers[name] = inst.getTopic(name).genericPublish(ty)
+            publishers[name] = inst.get_topic(name).generic_publish(ty)
         value = cmd["value"]
         if ty == "raw":
             value = bytes(value)
@@ -82,20 +83,20 @@ def handle(cmd):
         deadline = time.monotonic() + cmd.get("timeout", 5)
         while time.monotonic() < deadline:
             v = sub.get()
-            if v.isValid() and ("not" not in cmd or to_json(v.value()) != cmd["not"]):
+            if v.is_valid() and ("not" not in cmd or to_json(v.value()) != cmd["not"]):
                 return {
                     "ok": True,
-                    "type": sub.getTopic().getTypeString(),
+                    "type": sub.get_topic().get_type_string(),
                     "value": to_json(v.value()),
-                    "time": v.time(),
-                    "server_time": v.server_time(),
+                    "time": v.time() // 1000,
+                    "server_time": v.server_time() // 1000,
                 }
             time.sleep(0.01)
         return {"ok": False, "error": "timeout"}
     if c == "connections":
-        return {"ok": True, "names": [ci.remote_id for ci in inst.getConnections()]}
+        return {"ok": True, "names": [ci.remote_id for ci in inst.get_connections()]}
     if c == "now":
-        return {"ok": True, "now": ntcore._now()}
+        return {"ok": True, "now": ntcore._now() // 1000}
     return {"ok": False, "error": f"unknown command {c}"}
 
 

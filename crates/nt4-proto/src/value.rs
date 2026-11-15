@@ -370,11 +370,21 @@ fn decode_message(bytes: &mut Bytes<'_>) -> Result<BinaryMessage, BinaryError> {
     let timestamp_us = bytes.item()?.as_i64().ok_or(BinaryError::Timestamp)?;
     let type_id = bytes.item()?.as_i64().ok_or(BinaryError::TypeNotInt)?;
     let value = decode_value(type_id, bytes)?;
+    if !timestamp_in_range(timestamp_us) {
+        return Err(BinaryError::Timestamp);
+    }
     Ok(BinaryMessage {
         id,
         timestamp_us,
         value,
     })
+}
+
+/// ntcore (2027) holds times in nanoseconds and rejects a message whose
+/// microseconds don't fit once multiplied by 1000, about 292,000 years
+/// either way. Times stay microseconds here; only the rejection is copied.
+fn timestamp_in_range(timestamp_us: i64) -> bool {
+    timestamp_us.checked_mul(1000).is_some()
 }
 
 /// A MessagePack string as UTF-8. ntcore takes any bytes; a Rust `String`
@@ -515,6 +525,9 @@ mod tests {
                 ),
                 _ => return None,
             };
+            if !super::timestamp_in_range(timestamp_us) {
+                return None;
+            }
             Some(BinaryMessage {
                 id,
                 timestamp_us,

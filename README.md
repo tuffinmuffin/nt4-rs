@@ -10,7 +10,8 @@ MessagePack binary frames for values. The protocol is described in
 
 ## Status
 
-Milestone 3 of 6: the client is usable. The server comes next.
+Milestone 3 of 6: the client is usable. The server comes next. Current state
+and next steps are in [docs/STATUS.md](docs/STATUS.md).
 
 | Crate | What it does | Status |
 | --- | --- | --- |
@@ -101,7 +102,7 @@ CI runs the dry run on every push, so packaging problems show up early.
 
 ```bash
 cargo test --workspace
-# interop tests (optional): python -m pip install pyntcore==2026.2.2
+# interop tests (optional): python -m pip install --pre pyntcore==2027.0.0a8
 NT4_INTEROP_PYTHON=$(which python) cargo test -p nt4 --test interop
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings

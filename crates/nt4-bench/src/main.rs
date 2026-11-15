@@ -58,6 +58,12 @@ fn pct(sorted: &[i64], p: f64) -> Option<f64> {
     Some(sorted[i.min(sorted.len() - 1)] as f64 / 1000.0)
 }
 
+/// The server's address: `NT4_BENCH_HOST`, or 127.0.0.1. See bench/README.md
+/// for why the address matters with ntcore 2027.
+fn host() -> String {
+    std::env::var("NT4_BENCH_HOST").unwrap_or_else(|_| "127.0.0.1".into())
+}
+
 fn config_ok(values: &HashMap<String, Value>) -> bool {
     (0..20).all(|i| {
         values.get(&format!("/robot/config/str{i}")) == Some(&Value::String(format!("value-{i}")))
@@ -138,7 +144,7 @@ fn robot_value(ty: NtType, seq: i64) -> Value {
 }
 
 async fn run_robot(port: u16, seconds: f64, scale: usize) {
-    let client = Client::start(ClientConfig::server("nt4-robot", "127.0.0.1", port));
+    let client = Client::start(ClientConfig::server("nt4-robot", host(), port));
     assert!(
         client.wait_for_sync(Duration::from_secs(10)).await,
         "no server"
@@ -260,7 +266,7 @@ async fn main() {
     let native = mode == "native";
 
     let t0 = Instant::now();
-    let mut config = ClientConfig::server("nt4-bench", "127.0.0.1", port);
+    let mut config = ClientConfig::server("nt4-bench", host(), port);
     config.reconnect_delay = Duration::from_millis(100);
     let client = Client::start(config);
     if native {

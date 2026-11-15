@@ -86,12 +86,88 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install pyntcore==2026.2.2
+      - run: python -m pip install --pre pyntcore==2027.0.0a8
       - name: Interop tests
         shell: bash
         run: |
           export NT4_INTEROP_PYTHON="$(python -c 'import sys; print(sys.executable)')"
           cargo test -p nt4 --test interop -- --test-threads=1
+
+  # Differential fuzzer: nt4-proto's decoders against ntcore's own, from the
+  # pyntcore wheel (the oracle builds on Linux only). A short bounded run as
+  # a regression check; the seed is the run id, printed first, so a failure
+  # reproduces locally with --seed. Mismatches fail the job and are uploaded.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --pre pyntcore==2027.0.0a8
+      - name: Build with the ntcore oracle
+        run: |
+          echo "NT4_NTCORE_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+      - run: cargo build --release -p nt4-fuzz
+      - name: Fuzz for 60 seconds
+        run: |
+          ./target/release/nt4-fuzz --seconds 60 --seed ${{ github.run_id }} --out fuzz-findings | tee fuzz.log
+          # Without the oracle the fuzzer still runs, so check it was built in.
+          grep -q "oracle: ntcore" fuzz.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: fuzz-findings
+          if-no-files-found: ignore
+
+  # Performance regressions: count CPU instructions (Callgrind, through
+  # gungraun) for the hot paths in crates/nt4-perf, on the base branch and on
+  # this PR, in the same job. Counts don't depend on how busy the runner is.
+  # A benchmark more than 10% slower than the base gives a warning; more than
+  # 50% fails the job.
+  perf:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GUNGRAUN_RUNNER_VERSION: 0.20.0 # must match gungraun in crates/nt4-perf
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - run: cargo install gungraun-runner --version "$GUNGRAUN_RUNNER_VERSION" --locked
+      - name: Benchmark the base branch
+        id: base
+        run: |
+          git worktree add -q ../base "${{ github.event.pull_request.base.sha }}"
+          if [ -d ../base/crates/nt4-perf ]; then
+            (cd ../base && cargo bench -p nt4-perf --bench hot_paths -- --save-baseline=base)
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The base branch has no crates/nt4-perf yet; nothing to compare."
+          fi
+      - name: Benchmark this PR
+        run: cargo bench -p nt4-perf --bench hot_paths -- --save-baseline=pr
+      - name: Compare with the base (warn over 10%, fail over 50%)
+        if: steps.base.outputs.have == 'true'
+        run: |
+          compare() {
+            cargo bench -q -p nt4-perf --bench hot_paths -- \
+              --load-baseline=pr --baseline=base --callgrind-limits="ir=$1"
+          }
+          if ! compare 10% > compare.txt 2>&1; then
+            cat compare.txt
+            # Each regression is a benchmark name line, then the limit it broke.
+            awk '/exceeds limit/ { gsub(/^ +/, "", prev); gsub(/^ +/, "", $0);
+              print "::warning title=Performance regression::" prev " " $0 } { prev = $0 }' compare.txt
+          fi
+          compare 50%
 
   # Every tracked ntcore test case is ported or listed as not applicable.
   upstream-audit:

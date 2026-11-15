@@ -196,7 +196,15 @@ def main():
     ap.add_argument("--json", help="also write the results here")
     ap.add_argument("--only", help="comma-separated client names")
     ap.add_argument("--scenario", choices=["receive", "publish"], default="receive")
+    ap.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="address the server listens on and clients connect to; use this "
+        "machine's network address to measure ntcore's batched (non-local) path",
+    )
     args = ap.parse_args()
+    # Every program in bench/ reads the address from here.
+    os.environ["NT4_BENCH_HOST"] = args.host
 
     bench = os.path.join(ROOT, "target", "release", "nt4-bench")
     if args.scenario == "publish":
