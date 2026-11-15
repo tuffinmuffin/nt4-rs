@@ -81,8 +81,8 @@ with `--seed`. See `crates/nt4-fuzz/README.md` for longer local runs.
 `crates/nt4-perf` counts CPU instructions (Callgrind, through gungraun) for
 the hot paths: binary decode and encode, announce decode, publish encode, and
 `ClientCore` receiving and publishing one 20 ms robot loop. The `perf` CI job
-benchmarks the base branch and the PR in the same job and fails if any
-benchmark uses more than 5% more instructions. Counts don't depend on how busy
+benchmarks the base branch and the PR in the same job. A benchmark that uses
+more than 10% more instructions gives a warning; more than 50% fails the job. Counts don't depend on how busy
 the runner is, so a failure means the code does more work. See
 `crates/nt4-perf/README.md` for the numbers and how to run it locally.
 

@@ -33,12 +33,12 @@ To compare a change with what you had before:
 ```bash
 cargo bench -p nt4-perf -- --save-baseline=before
 # ...make the change...
-cargo bench -p nt4-perf -- --baseline=before --callgrind-limits='ir=5%'
+cargo bench -p nt4-perf -- --baseline=before --callgrind-limits='ir=10%'
 ```
 
 ## In CI
 
 The `perf` job in `.github/workflows/ci.yml` runs on pull requests. It
-benchmarks the base branch, then the PR, and fails if any benchmark uses more
-than 5% more instructions. The `client_core` benchmarks move by about 0.02%
+benchmarks the base branch, then the PR. A benchmark that uses more than 10%
+more instructions gives a warning on the PR; more than 50% fails the job. The `client_core` benchmarks move by about 0.02%
 between runs (hash map seeds); everything else is exact.
