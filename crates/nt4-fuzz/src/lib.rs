@@ -608,7 +608,11 @@ mod oracle {
         unsafe { nt4_oracle_free(p) };
         let mut de = serde_json::Deserializer::from_str(&s);
         de.disable_recursion_limit();
-        let j = serde_json::Value::deserialize(&mut de).expect("oracle writes JSON");
+        let j = de
+            .into_iter::<Json>()
+            .next()
+            .expect("oracle writes JSON")
+            .expect("oracle writes JSON");
         super::normalize(j)
     }
 
