@@ -93,6 +93,36 @@ jobs:
           export NT4_INTEROP_PYTHON="$(python -c 'import sys; print(sys.executable)')"
           cargo test -p nt4 --test interop -- --test-threads=1
 
+  # Differential fuzzer: nt4-proto's decoders against ntcore's own, from the
+  # pyntcore wheel (the oracle builds on Linux only). A short bounded run as
+  # a regression check; the seed is the run id, printed first, so a failure
+  # reproduces locally with --seed. Mismatches fail the job and are uploaded.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pyntcore==2026.2.2
+      - name: Build with the ntcore oracle
+        run: |
+          echo "NT4_NTCORE_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+      - run: cargo build --release -p nt4-fuzz
+      - name: Fuzz for 60 seconds
+        run: |
+          ./target/release/nt4-fuzz --seconds 60 --seed ${{ github.run_id }} --out fuzz-findings | tee fuzz.log
+          # Without the oracle the fuzzer still runs, so check it was built in.
+          grep -q "oracle: ntcore" fuzz.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: fuzz-findings
+          if-no-files-found: ignore
+
   # Every tracked ntcore test case is ported or listed as not applicable.
   upstream-audit:
     runs-on: ubuntu-latest

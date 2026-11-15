@@ -14,8 +14,8 @@ to enable the oracle:
 NT4_NTCORE_PYTHON=<python with pyntcore> cargo build --release -p nt4-fuzz
 ```
 
-The oracle links ntcore's own shared libraries directly out of the pyntcore
-wheel. Build.rs finds them by running Python to locate `site-packages/native`.
+The oracle builds on Linux only. It links ntcore's own shared libraries
+directly out of the pyntcore wheel. Build.rs finds them by running Python to locate `site-packages/native`.
 
 ## Running
 
@@ -30,6 +30,9 @@ wheel. Build.rs finds them by running Python to locate `site-packages/native`.
 ```
 
 Set `NT4_FUZZ_DEBUG` to see panics in nt4-proto on stderr.
+
+CI runs it with the oracle for 60 seconds on every push (the `fuzz` job in
+`.github/workflows/ci.yml`), seeded with the run id.
 
 ## What it checks
 
