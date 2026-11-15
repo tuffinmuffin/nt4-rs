@@ -44,6 +44,11 @@ import time
 
 import ntcore
 
+# The address to serve on or connect to. ntcore 2027 treats a 127.x peer as
+# "local" and sends it every value in its own frame, with no batching, so the
+# address changes what is measured; see bench/README.md.
+HOST = os.environ.get("NT4_BENCH_HOST", "127.0.0.1")
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, default=5810)
 ap.add_argument("--seconds", type=float, default=60)
@@ -69,12 +74,12 @@ args = ap.parse_args()
 
 inst = ntcore.NetworkTableInstance.create()
 if args.connect:
-    inst.set_server("127.0.0.1", args.connect)
+    inst.set_server(HOST, args.connect)
     inst.start_client("robot-sim")
     while not inst.is_connected():
         time.sleep(0.01)
 else:
-    inst.start_server("", "127.0.0.1", "", args.port)
+    inst.start_server("", HOST, "", args.port)
 if args.server_only:
     print(json.dumps({"ready": True, "topics": 0}), flush=True)
     time.sleep(args.seconds)
