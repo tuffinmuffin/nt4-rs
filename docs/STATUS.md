@@ -76,12 +76,29 @@ over the three targets, and the whole job takes about 1.5 minutes. The seed
 is the run id, printed on the first line, so a failure reproduces locally
 with `--seed`. See `crates/nt4-fuzz/README.md` for longer local runs.
 
+## Performance regression checks
+
+`crates/nt4-perf` counts CPU instructions (Callgrind, through gungraun) for
+the hot paths: binary decode and encode, announce decode, publish encode, and
+`ClientCore` receiving and publishing one 20 ms robot loop. The `perf` CI job
+benchmarks the base branch and the PR in the same job. A benchmark that uses
+more than 10% more instructions gives a warning; more than 50% fails the job. Counts don't depend on how busy
+the runner is, so a failure means the code does more work. See
+`crates/nt4-perf/README.md` for the numbers and how to run it locally.
+
+One thing it shows: `ClientCore` spends about 8,300 instructions per value
+when publishing, against about 1,300 when receiving. That may be worth a look.
+
+The `bench/` load benchmark against pyntcore stays a manual tool and is not
+run in CI. nt4 is meant for hosts and coprocessors, so the instruction-count
+check is enough.
+
 ## Next steps
 
 1. **Review and merge PR #3.**
 2. **Report the `1e400` ntcore bug to allwpilib** (2026 branch only).
 3. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
-   once it exists.
+   once it exists, and add server benchmarks to `nt4-perf`.
 
 ## Picking this up locally
 
