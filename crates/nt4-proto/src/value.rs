@@ -255,6 +255,16 @@ impl Item<'_> {
         }
     }
 
+    /// Any number as `f32`, like mpack's `expect_float`: a `float 32` keeps
+    /// its exact bits (a signaling NaN stays one), anything else is
+    /// converted.
+    fn as_f32(&self) -> Option<f32> {
+        match *self {
+            Item::F32(f) => Some(f),
+            _ => self.as_f64().map(|d| d as f32),
+        }
+    }
+
     /// Any number as `f64`, like mpack's `expect_double`. Some peers pack a
     /// whole-number double as an integer.
     fn as_f64(&self) -> Option<f64> {
@@ -367,9 +377,16 @@ fn decode_message(bytes: &mut Bytes<'_>) -> Result<BinaryMessage, BinaryError> {
     })
 }
 
+/// A MessagePack string as UTF-8. ntcore takes any bytes; a Rust `String`
+/// can't hold that, so invalid sequences become U+FFFD instead of failing
+/// the message (and with it the rest of the frame).
+fn utf8_lossy(b: &[u8]) -> String {
+    String::from_utf8_lossy(b).into_owned()
+}
+
 fn decode_value(type_id: i64, bytes: &mut Bytes<'_>) -> Result<Value, BinaryError> {
     let bad = || BinaryError::ValueMismatch(type_id);
-    let string = |b: &[u8]| String::from_utf8(b.to_vec()).map_err(|_| bad());
+
     // An array of `f`'s results; any other item is a mismatch.
     fn array<T>(
         bytes: &mut Bytes<'_>,
@@ -396,9 +413,9 @@ fn decode_value(type_id: i64, bytes: &mut Bytes<'_>) -> Result<Value, BinaryErro
         })?),
         17 => Value::DoubleArray(array(bytes, bad, |i| i.as_f64())?),
         18 => Value::IntArray(array(bytes, bad, |i| i.as_i64())?),
-        19 => Value::FloatArray(array(bytes, bad, |i| i.as_f64().map(|f| f as f32))?),
+        19 => Value::FloatArray(array(bytes, bad, |i| i.as_f32())?),
         20 => Value::StringArray(array(bytes, bad, |i| match i {
-            Item::Str(b) => String::from_utf8(b.to_vec()).ok(),
+            Item::Str(b) => Some(utf8_lossy(b)),
             _ => None,
         })?),
         _ => {
@@ -407,8 +424,8 @@ fn decode_value(type_id: i64, bytes: &mut Bytes<'_>) -> Result<Value, BinaryErro
                 (0, Item::Bool(b)) => Value::Boolean(b),
                 (1, i) => Value::Double(i.as_f64().ok_or_else(bad)?),
                 (2, i) => Value::Int(i.as_i64().ok_or_else(bad)?),
-                (3, i) => Value::Float(i.as_f64().ok_or_else(bad)? as f32),
-                (4, Item::Str(b)) => Value::String(string(b)?),
+                (3, i) => Value::Float(i.as_f32().ok_or_else(bad)?),
+                (4, Item::Str(b)) => Value::String(utf8_lossy(b)),
                 (5, Item::Bin(b)) => Value::Raw(b.to_vec()),
                 _ => return Err(bad()),
             }
@@ -467,7 +484,7 @@ mod tests {
                 2 => Value::Int(v.as_i64()?),
                 3 => Value::Float(number(&v)? as f32),
                 4 => match v {
-                    V::String(s) => Value::String(s.into_str()?),
+                    V::String(s) => Value::String(String::from_utf8_lossy(s.as_bytes()).into_owned()),
                     _ => return None,
                 },
                 5 => match v {
@@ -486,7 +503,10 @@ mod tests {
                 20 => Value::StringArray(
                     arr(v)?
                         .iter()
-                        .map(|x| x.as_str().map(str::to_owned))
+                        .map(|x| match x {
+                            V::String(s) => Some(String::from_utf8_lossy(s.as_bytes()).into_owned()),
+                            _ => None,
+                        })
                         .collect::<Option<_>>()?,
                 ),
                 _ => return None,

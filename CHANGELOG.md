@@ -23,3 +23,11 @@ First release.
   tick is at most 100 ms, local publish and subscribe changes are sent at
   once, `TCP_NODELAY` is on, and `nt4-proto` decodes MessagePack directly
   (no rmpv at run time).
+- Differential fuzzer in `crates/nt4-fuzz/` (see `crates/nt4-fuzz/README.md`).
+  Generates structure-aware frames, runs nt4-proto and ntcore's own decoders
+  on the same bytes, and compares. Found and fixed: invalid UTF-8 in string
+  values was rejected (ntcore accepts them, using replacement characters);
+  `-0` integer literals were parsed as `-0.0` (ntcore treats them as 0); some
+  integer id fields above `i64::MAX` were not properly rejected. Also
+  discovered an ntcore crash: number overflow in JSON text frames
+  (`1e400`, `-1e400`) causes ntcore to throw an unhandled C++ exception.
