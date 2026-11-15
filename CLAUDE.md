@@ -57,6 +57,8 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 python3 scripts/upstream_audit.py <allwpilib checkout>
 NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --test interop
+# coverage, as the CI `coverage` job measures it (needs cargo-llvm-cov)
+cargo llvm-cov -p nt4-proto -p nt4-core -p nt4 --ignore-filename-regex '(tests|examples|benches)/' --html
 ```
 
 ntcore facts learned from interop: the server always renames a client to

@@ -128,6 +128,20 @@ over the three targets, and the whole job takes about 1.5 minutes. The seed
 is the run id, printed on the first line, so a failure reproduces locally
 with `--seed`. See `crates/nt4-fuzz/README.md` for longer local runs.
 
+## Test coverage
+
+The `coverage` CI job measures line, function and region coverage of
+`nt4-proto`, `nt4-core` and `nt4` with cargo-llvm-cov, including the
+pyntcore interop tests (test, example and bench files are not counted).
+`scripts/coverage_summary.py` turns the result into a table per crate and
+per file, with the change from the base branch on a PR. It goes in the job
+summary and in one PR comment that each push updates; the HTML report is
+the `coverage-html` artifact. Fork PRs get only the job summary (their token
+can't comment). Nothing fails on coverage yet.
+
+At the start (milestone 4, locally without interop): `nt4-proto` 96.6% and
+`nt4-core` 90.0% of lines.
+
 ## Performance regression checks
 
 `crates/nt4-perf` counts CPU instructions (Callgrind, through gungraun) for

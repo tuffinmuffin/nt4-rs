@@ -2,26 +2,62 @@
 //! (`$clients`, `$pub$<topic>` and so on).
 //!
 //! It writes each value in its most compact form, as mpack (which ntcore
-//! uses) does, so meta values match ntcore's byte for byte.
+//! uses) does, so meta values match ntcore's byte for byte. The marker bytes
+//! below are the format names from the MessagePack spec,
+//! <https://github.com/msgpack/msgpack/blob/master/spec.md#formats>.
 
 use nt4_proto::SubscriptionOptions;
 
 use crate::outgoing::DEFAULT_PERIOD_MS;
 
+// "fix" formats carry a small value or length in the marker's low bits.
+/// positive fixint: 0x00-0x7f is the value itself.
+const POSITIVE_FIXINT_MAX: u64 = 0x7f;
+/// negative fixint: 0xe0-0xff is -32 to -1.
+const NEGATIVE_FIXINT_MIN: i64 = -32;
+/// fixmap: 0x80 | length (up to 15 entries).
+const FIXMAP: u8 = 0x80;
+/// fixarray: 0x90 | length (up to 15 elements).
+const FIXARRAY: u8 = 0x90;
+/// Longest map or array a fix format holds.
+const FIX_CONTAINER_MAX: usize = 15;
+/// fixstr: 0xa0 | length (up to 31 bytes).
+const FIXSTR: u8 = 0xa0;
+/// Longest string a fixstr holds.
+const FIXSTR_MAX: usize = 31;
+
+const FALSE: u8 = 0xc2;
+const TRUE: u8 = 0xc3;
+const FLOAT32: u8 = 0xca;
+const UINT8: u8 = 0xcc;
+const UINT16: u8 = 0xcd;
+const UINT32: u8 = 0xce;
+const UINT64: u8 = 0xcf;
+const INT8: u8 = 0xd0;
+const INT16: u8 = 0xd1;
+const INT32: u8 = 0xd2;
+const INT64: u8 = 0xd3;
+const STR8: u8 = 0xd9;
+const STR16: u8 = 0xda;
+const STR32: u8 = 0xdb;
+const ARRAY16: u8 = 0xdc;
+const ARRAY32: u8 = 0xdd;
+const MAP16: u8 = 0xde;
+const MAP32: u8 = 0xdf;
 #[derive(Debug, Default)]
 pub(crate) struct Writer(pub(crate) Vec<u8>);
 
 impl Writer {
     pub(crate) fn array(&mut self, len: usize) {
-        self.len_header(len, 0x90, 0xdc, 0xdd);
+        self.len_header(len, FIXARRAY, ARRAY16, ARRAY32);
     }
 
     pub(crate) fn map(&mut self, len: usize) {
-        self.len_header(len, 0x80, 0xde, 0xdf);
+        self.len_header(len, FIXMAP, MAP16, MAP32);
     }
 
     fn len_header(&mut self, len: usize, fix: u8, m16: u8, m32: u8) {
-        if len <= 15 {
+        if len <= FIX_CONTAINER_MAX {
             self.0.push(fix | len as u8);
         } else if let Ok(n) = u16::try_from(len) {
             self.0.push(m16);
@@ -35,16 +71,16 @@ impl Writer {
 
     pub(crate) fn str(&mut self, s: &str) {
         let len = s.len();
-        if len <= 31 {
-            self.0.push(0xa0 | len as u8);
+        if len <= FIXSTR_MAX {
+            self.0.push(FIXSTR | len as u8);
         } else if let Ok(n) = u8::try_from(len) {
-            self.0.push(0xd9);
+            self.0.push(STR8);
             self.0.push(n);
         } else if let Ok(n) = u16::try_from(len) {
-            self.0.push(0xda);
+            self.0.push(STR16);
             self.0.extend_from_slice(&n.to_be_bytes());
         } else {
-            self.0.push(0xdb);
+            self.0.push(STR32);
             self.0
                 .extend_from_slice(&u32::try_from(len).unwrap_or(u32::MAX).to_be_bytes());
         }
@@ -52,18 +88,18 @@ impl Writer {
     }
 
     pub(crate) fn uint(&mut self, v: u64) {
-        if v <= 0x7f {
+        if v <= POSITIVE_FIXINT_MAX {
             self.0.push(v as u8);
         } else if let Ok(n) = u8::try_from(v) {
-            self.0.extend_from_slice(&[0xcc, n]);
+            self.0.extend_from_slice(&[UINT8, n]);
         } else if let Ok(n) = u16::try_from(v) {
-            self.0.push(0xcd);
+            self.0.push(UINT16);
             self.0.extend_from_slice(&n.to_be_bytes());
         } else if let Ok(n) = u32::try_from(v) {
-            self.0.push(0xce);
+            self.0.push(UINT32);
             self.0.extend_from_slice(&n.to_be_bytes());
         } else {
-            self.0.push(0xcf);
+            self.0.push(UINT64);
             self.0.extend_from_slice(&v.to_be_bytes());
         }
     }
@@ -71,28 +107,28 @@ impl Writer {
     pub(crate) fn int(&mut self, v: i64) {
         if let Ok(u) = u64::try_from(v) {
             self.uint(u);
-        } else if v >= -32 {
+        } else if v >= NEGATIVE_FIXINT_MIN {
             self.0.push(v as i8 as u8);
         } else if let Ok(n) = i8::try_from(v) {
-            self.0.extend_from_slice(&[0xd0, n as u8]);
+            self.0.extend_from_slice(&[INT8, n as u8]);
         } else if let Ok(n) = i16::try_from(v) {
-            self.0.push(0xd1);
+            self.0.push(INT16);
             self.0.extend_from_slice(&n.to_be_bytes());
         } else if let Ok(n) = i32::try_from(v) {
-            self.0.push(0xd2);
+            self.0.push(INT32);
             self.0.extend_from_slice(&n.to_be_bytes());
         } else {
-            self.0.push(0xd3);
+            self.0.push(INT64);
             self.0.extend_from_slice(&v.to_be_bytes());
         }
     }
 
     pub(crate) fn bool(&mut self, v: bool) {
-        self.0.push(if v { 0xc3 } else { 0xc2 });
+        self.0.push(if v { TRUE } else { FALSE });
     }
 
     pub(crate) fn f32(&mut self, v: f32) {
-        self.0.push(0xca);
+        self.0.push(FLOAT32);
         self.0.extend_from_slice(&v.to_be_bytes());
     }
 
