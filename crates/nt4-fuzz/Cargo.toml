@@ -1,0 +1,27 @@
+[package]
+name = "nt4-fuzz"
+description = "Differential fuzzer: nt4-proto's decoders against ntcore's (not published)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+nt4-proto = { path = "../nt4-proto" }
+nt4-core = { path = "../nt4-core" }
+# unbounded_depth: the oracle's output nests as deep as the input did.
+serde_json = { workspace = true, features = ["unbounded_depth"] }
+
+[build-dependencies]
+cc = "1"
+
+# The workspace forbids unsafe code; this crate needs it for the oracle's C
+# API (src/lib.rs, mod oracle) and nothing else.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

@@ -29,6 +29,15 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # The crates still package and build from what crates.io would get.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo publish --workspace --dry-run
+
   # nt4-proto and nt4-core must stay free of sockets and runtimes so they
   # build for the browser.
   wasm:
@@ -59,7 +68,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      # nt4-fuzz is a dev tool (publish = false) with no MSRV guarantee.
+      - run: cargo test --workspace --exclude nt4-fuzz
+
+  # Our client against a real ntcore server (pyntcore). Pin the version so a
+  # WPILib change shows up as a named failure here.
+  interop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pyntcore==2026.2.2
+      - name: Interop tests
+        shell: bash
+        run: |
+          export NT4_INTEROP_PYTHON="$(python -c 'import sys; print(sys.executable)')"
+          cargo test -p nt4 --test interop -- --test-threads=1
 
   # Every tracked ntcore test case is ported or listed as not applicable.
   upstream-audit:

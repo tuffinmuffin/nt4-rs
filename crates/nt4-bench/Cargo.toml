@@ -1,0 +1,17 @@
+[package]
+name = "nt4-bench"
+description = "Load test for the nt4 client against a simulated robot (not published)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+nt4 = { path = "../nt4" }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

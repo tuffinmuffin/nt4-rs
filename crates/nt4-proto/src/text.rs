@@ -317,7 +317,9 @@ fn decode_frame<M>(
         messages: Vec::new(),
         warnings: Vec::new(),
     };
-    let json: Json = match serde_json::from_str(text) {
+    // ntcore's JSON parser stops at a NUL as if the input ended there.
+    let text = text.split('\0').next().unwrap_or_default();
+    let json: Json = match serde_json::from_str(&negative_zero_as_integer(text)) {
         Ok(j) => j,
         Err(e) => {
             out.warnings
@@ -354,6 +356,43 @@ fn decode_frame<M>(
     out
 }
 
+/// `text` with each `-0` number (not `-0.0`) written as `0`. ntcore's JSON
+/// library reads `-0` as the integer 0, serde_json as the double -0.0,
+/// which would make `"id": -0` "not a number" and change `-0` properties.
+fn negative_zero_as_integer(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains("-0") {
+        return text.into();
+    }
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let (mut in_string, mut escaped, mut last) = (false, false, 0);
+    for i in 0..b.len() {
+        let c = b[i];
+        if in_string {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+        } else if c == b'"' {
+            in_string = true;
+        } else if c == b'-'
+            && b.get(i + 1) == Some(&b'0')
+            && !matches!(b.get(i + 2), Some(b'.' | b'e' | b'E' | b'0'..=b'9'))
+            && !matches!(
+                i.checked_sub(1).map(|j| b[j]),
+                Some(b'0'..=b'9' | b'e' | b'E' | b'.')
+            )
+        {
+            out.push_str(&text[last..i]);
+            last = i + 1; // drop the '-'
+        }
+    }
+    out.push_str(&text[last..]);
+    out.into()
+}
+
 fn get_string(params: &mut Params, key: &str) -> Result<String, String> {
     match params.remove(key) {
         None => Err(format!("no {key} key")),
@@ -362,10 +401,23 @@ fn get_string(params: &mut Params, key: &str) -> Result<String, String> {
     }
 }
 
-fn get_int(params: &Params, key: &str) -> Result<i64, String> {
+/// The id in `key`, checked as ntcore does; `what` names it in the range
+/// error.
+fn get_id(params: &Params, key: &str, what: &str) -> Result<i32, String> {
     match params.get(key) {
         None => Err(format!("no {key} key")),
-        Some(v) => v.as_i64().ok_or_else(|| format!("{key} must be a number")),
+        Some(v) => id_value(v, &format!("{key} must be a number"), what),
+    }
+}
+
+/// An id value. ntcore also takes integers above `i64::MAX` and wraps them
+/// (so `18446744073709551615` becomes -1, a valid id); that's a bug, so here
+/// they are out of range, as ntcore says for most of them.
+fn id_value(v: &Json, not_a_number: &str, what: &str) -> Result<i32, String> {
+    match v.as_i64() {
+        Some(i) => id_range(i, what),
+        None if v.is_u64() => Err(format!("{what} out of range")),
+        None => Err(not_a_number.to_owned()),
     }
 }
 
@@ -391,7 +443,7 @@ fn decode_client(method: &str, params: &mut Params) -> Result<ClientMessage, Str
         "publish" => {
             let name = get_string(params, "name")?;
             let ty = get_string(params, "type")?;
-            let pubuid = id_range(get_int(params, "pubuid")?, "pubuid")?;
+            let pubuid = get_id(params, "pubuid", "pubuid")?;
             // A missing properties key is treated as empty.
             let properties = match params.remove("properties") {
                 None => Properties::new(),
@@ -406,7 +458,7 @@ fn decode_client(method: &str, params: &mut Params) -> Result<ClientMessage, Str
             }
         }
         "unpublish" => ClientMessage::Unpublish {
-            pubuid: id_range(get_int(params, "pubuid")?, "pubuid")?,
+            pubuid: get_id(params, "pubuid", "pubuid")?,
         },
         "setproperties" => {
             let name = get_string(params, "name")?;
@@ -414,7 +466,7 @@ fn decode_client(method: &str, params: &mut Params) -> Result<ClientMessage, Str
             ClientMessage::SetProperties { name, update }
         }
         "subscribe" => {
-            let subuid = id_range(get_int(params, "subuid")?, "subuid")?;
+            let subuid = get_id(params, "subuid", "subuid")?;
             let options = match params.remove("options") {
                 None => SubscriptionOptions::default(),
                 Some(Json::Object(o)) => decode_options(&o)?,
@@ -440,7 +492,7 @@ fn decode_client(method: &str, params: &mut Params) -> Result<ClientMessage, Str
         }
         // ntcore says "pubuid out of range" here; this says subuid.
         "unsubscribe" => ClientMessage::Unsubscribe {
-            subuid: id_range(get_int(params, "subuid")?, "subuid")?,
+            subuid: get_id(params, "subuid", "subuid")?,
         },
         other => return Err(format!("unrecognized method '{other}'")),
     })
@@ -478,16 +530,11 @@ fn decode_server(
     Ok(match method {
         "announce" => {
             let name = get_string(params, "name")?;
-            let id = id_range(get_int(params, "id")?, "id")?;
+            let id = get_id(params, "id", "id")?;
             let ty = get_string(params, "type")?;
             let pubuid = match params.get("pubuid") {
                 None => None,
-                Some(v) => {
-                    let v = v
-                        .as_i64()
-                        .ok_or_else(|| "pubuid value must be a number".to_string())?;
-                    Some(id_range(v, "pubuid")?)
-                }
+                Some(v) => Some(id_value(v, "pubuid value must be a number", "pubuid")?),
             };
             let properties = match params.remove("properties") {
                 None => return Err("no properties key".into()),
@@ -507,7 +554,7 @@ fn decode_server(
         }
         "unannounce" => {
             let name = get_string(params, "name")?;
-            let id = id_range(get_int(params, "id")?, "id")?;
+            let id = get_id(params, "id", "id")?;
             ServerMessage::Unannounce { name, id }
         }
         "properties" => {

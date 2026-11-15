@@ -132,13 +132,13 @@ fn publish_value_and_subscribe_go_out_after_sync() {
     };
     let s = client.subscribe(vec!["/robot/".into()], sub_opts.clone());
 
+    // Everything goes out as soon as the time sync reply arrives, without
+    // waiting for the next send_outgoing (ntcore waits for its timer).
     connect_synced(&mut client, 10_000, ProtocolVersion::V4_1);
-    client.send_outgoing(20_000, false);
 
     assert_eq!(
         drain_transmit(&mut client),
         vec![
-            Out::Ping,
             Out::Text(vec![publish_msg("/robot/x", p.uid())]),
             // Local time 2000 us plus the offset.
             Out::Binary(vec![value_msg(p.uid(), 2_000 + OFFSET, 1.5)]),
@@ -334,11 +334,9 @@ fn reconnect_replays_publishers_last_values_and_subscriptions() {
     client.set_value(a2, Value::Double(2.0), 200).unwrap();
 
     connect_synced(&mut client, 1_000_000, ProtocolVersion::V4_1);
-    client.send_outgoing(1_010_000, true);
     assert_eq!(
         drain_transmit(&mut client),
         vec![
-            Out::Ping,
             Out::Text(vec![
                 publish_msg("/a", a1.uid()),
                 publish_msg("/a", a2.uid()),
@@ -524,7 +522,8 @@ fn blocked_wire_holds_messages() {
 #[test]
 fn tick_period_follows_publish_periods() {
     let mut client = ClientCore::new();
-    assert_eq!(client.tick_period_ms(), 200);
+    // Capped at 100 ms, the period of publish/subscribe messages.
+    assert_eq!(client.tick_period_ms(), 100);
     let opts = |s: f64| PublishOptions {
         periodic: Some(s),
         ..Default::default()
@@ -536,7 +535,7 @@ fn tick_period_follows_publish_periods() {
     client.unpublish(b);
     assert_eq!(client.tick_period_ms(), 100);
     client.unpublish(a);
-    assert_eq!(client.tick_period_ms(), 200);
+    assert_eq!(client.tick_period_ms(), 100);
     client.publish("/c", NtType::Double, Properties::new(), opts(0.001));
     assert_eq!(client.tick_period_ms(), 5);
 }

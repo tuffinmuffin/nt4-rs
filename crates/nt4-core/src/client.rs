@@ -549,9 +549,13 @@ impl ClientCore {
 
     /// How often to call [`send_outgoing`](Self::send_outgoing), in
     /// milliseconds: the greatest common divisor of the publish periods,
-    /// between 5 and 200 ms.
+    /// between 5 and 100 ms.
+    ///
+    /// The cap is the 100 ms period of the queue that carries publish,
+    /// subscribe and property messages; ntcore gets the same from a separate
+    /// 100 ms timer.
     pub fn tick_period_ms(&self) -> u32 {
-        self.period_ms
+        self.period_ms.min(outgoing::DEFAULT_PERIOD_MS)
     }
 
     fn clamp_period(&mut self) {
@@ -800,7 +804,14 @@ impl ClientCore {
         conn.rtt_answered = true;
         match conn.time_sync.handle_reply(now_us, msg) {
             Ok(Some(update)) => {
+                // Only the first reply gives an update. Everything queued since
+                // connect (publishers, values, subscriptions) was waiting for
+                // it; ntcore leaves that for its next timer (up to 100 ms),
+                // we send it now.
                 conn.outgoing.set_time_offset(update.server_time_offset_us);
+                conn.outgoing
+                    .send_outgoing(&mut self.wire, to_ms(now_us), false);
+                self.wire.finish();
                 self.events.push_back(Event::TimeSync(update));
             }
             Ok(None) => {}
