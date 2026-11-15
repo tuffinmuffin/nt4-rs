@@ -484,7 +484,9 @@ mod tests {
                 2 => Value::Int(v.as_i64()?),
                 3 => Value::Float(number(&v)? as f32),
                 4 => match v {
-                    V::String(s) => Value::String(String::from_utf8_lossy(s.as_bytes()).into_owned()),
+                    V::String(s) => {
+                        Value::String(String::from_utf8_lossy(s.as_bytes()).into_owned())
+                    }
                     _ => return None,
                 },
                 5 => match v {
@@ -504,7 +506,9 @@ mod tests {
                     arr(v)?
                         .iter()
                         .map(|x| match x {
-                            V::String(s) => Some(String::from_utf8_lossy(s.as_bytes()).into_owned()),
+                            V::String(s) => {
+                                Some(String::from_utf8_lossy(s.as_bytes()).into_owned())
+                            }
                             _ => None,
                         })
                         .collect::<Option<_>>()?,

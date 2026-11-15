@@ -380,7 +380,10 @@ fn negative_zero_as_integer(text: &str) -> std::borrow::Cow<'_, str> {
         } else if c == b'-'
             && b.get(i + 1) == Some(&b'0')
             && !matches!(b.get(i + 2), Some(b'.' | b'e' | b'E' | b'0'..=b'9'))
-            && !matches!(i.checked_sub(1).map(|j| b[j]), Some(b'0'..=b'9' | b'e' | b'E' | b'.'))
+            && !matches!(
+                i.checked_sub(1).map(|j| b[j]),
+                Some(b'0'..=b'9' | b'e' | b'E' | b'.')
+            )
         {
             out.push_str(&text[last..i]);
             last = i + 1; // drop the '-'

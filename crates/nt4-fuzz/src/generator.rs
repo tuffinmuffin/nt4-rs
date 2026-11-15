@@ -24,6 +24,7 @@ impl Rng {
         }
     }
     /// The next 64 random bits.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u64 {
         self.state ^= self.state >> 12;
         self.state ^= self.state << 25;
@@ -269,7 +270,10 @@ fn any_item(rng: &mut Rng, out: &mut Vec<u8>, depth: u32) {
             out.push(0xca);
             out.extend((some_f64(rng) as f32).to_be_bytes());
         }
-        3 | 4 => { let v = some_int(rng); int(rng, out, v) },
+        3 | 4 => {
+            let v = some_int(rng);
+            int(rng, out, v)
+        }
         5 => {
             let s = some_str(rng);
             str_header(rng, out, s.len());
@@ -343,11 +347,21 @@ fn value(rng: &mut Rng, out: &mut Vec<u8>, type_id: i128) {
                 out.push(0xca);
                 out.extend((some_f64(rng) as f32).to_be_bytes());
             }
-            _ => { let v = some_int(rng); int(rng, out, v) },
+            _ => {
+                let v = some_int(rng);
+                int(rng, out, v)
+            }
         },
-        2 => { let v = some_int(rng); int(rng, out, v) },
+        2 => {
+            let v = some_int(rng);
+            int(rng, out, v)
+        }
         4 => {
-            let s = if rng.one_in(3) { some_str(rng) } else { b"value".to_vec() };
+            let s = if rng.one_in(3) {
+                some_str(rng)
+            } else {
+                b"value".to_vec()
+            };
             str_header(rng, out, s.len());
             out.extend(s);
         }
@@ -385,10 +399,16 @@ fn small_element(rng: &mut Rng, out: &mut Vec<u8>, type_id: i128) {
                 out.push(0xcb);
                 out.extend(some_f64(rng).to_be_bytes());
             } else {
-                { let v = rng.below(300) as i128 - 150; int(rng, out, v) };
+                {
+                    let v = rng.below(300) as i128 - 150;
+                    int(rng, out, v)
+                };
             }
         }
-        2 => { let v = some_int(rng); int(rng, out, v) },
+        2 => {
+            let v = some_int(rng);
+            int(rng, out, v)
+        }
         _ => {
             let n = rng.below(6) as usize;
             str_header(rng, out, n);
@@ -398,7 +418,11 @@ fn small_element(rng: &mut Rng, out: &mut Vec<u8>, type_id: i128) {
 }
 
 fn message(rng: &mut Rng, out: &mut Vec<u8>) {
-    let n = if rng.one_in(25) { rng.below(7) as usize } else { 4 };
+    let n = if rng.one_in(25) {
+        rng.below(7) as usize
+    } else {
+        4
+    };
     array_header(rng, out, n);
     let type_id = *rng.pick(&TYPES);
     for i in 0..n {
@@ -408,10 +432,17 @@ fn message(rng: &mut Rng, out: &mut Vec<u8>) {
         }
         match i {
             0 => {
-                let id = if rng.one_in(4) { some_int(rng) } else { rng.below(1000) as i128 - 1 };
+                let id = if rng.one_in(4) {
+                    some_int(rng)
+                } else {
+                    rng.below(1000) as i128 - 1
+                };
                 int(rng, out, id);
             }
-            1 => { let v = some_int(rng); int(rng, out, v) },
+            1 => {
+                let v = some_int(rng);
+                int(rng, out, v)
+            }
             2 => int(rng, out, type_id),
             _ => value(rng, out, type_id),
         }
@@ -446,10 +477,28 @@ fn json_string(rng: &mut Rng, s: &mut String) {
 
 fn json_number(rng: &mut Rng, s: &mut String) {
     const EDGES: [&str; 22] = [
-        "0", "-0", "1", "-1", "1.0", "1.5", "-1.5", "1e2", "1E+2", "2.5e-3", "1e400", "-1e400",
-        "1e-400", "2147483647", "2147483648", "-2147483648", "-2147483649",
-        "9223372036854775807", "9223372036854775808", "18446744073709551615",
-        "18446744073709551616", "123456789012345678901234567890",
+        "0",
+        "-0",
+        "1",
+        "-1",
+        "1.0",
+        "1.5",
+        "-1.5",
+        "1e2",
+        "1E+2",
+        "2.5e-3",
+        "1e400",
+        "-1e400",
+        "1e-400",
+        "2147483647",
+        "2147483648",
+        "-2147483648",
+        "-2147483649",
+        "9223372036854775807",
+        "9223372036854775808",
+        "18446744073709551615",
+        "18446744073709551616",
+        "123456789012345678901234567890",
     ];
     if rng.one_in(2) {
         s.push_str(rng.pick(&EDGES));
@@ -493,7 +542,10 @@ fn json_object(rng: &mut Rng, s: &mut String, depth: u32) {
             s.push(',');
         }
         let key = rng.pick(&["persistent", "retained", "cached", "a", "", "x\\u00e9"]);
-        s.push_str(&format!("\"{key}{}\":", if n > 10 { i.to_string() } else { String::new() }));
+        s.push_str(&format!(
+            "\"{key}{}\":",
+            if n > 10 { i.to_string() } else { String::new() }
+        ));
         json_any(rng, s, depth);
     }
     s.push('}');
@@ -525,7 +577,13 @@ fn field_value(rng: &mut Rng, s: &mut String, kind: Kind) {
             if rng.one_in(3) {
                 json_string(rng, s);
             } else {
-                s.push_str(rng.pick(&["\"/a\"", "\"/robot/x\"", "\"double\"", "\"\"", "\"int[]\""]));
+                s.push_str(rng.pick(&[
+                    "\"/a\"",
+                    "\"/robot/x\"",
+                    "\"double\"",
+                    "\"\"",
+                    "\"int[]\"",
+                ]));
             }
         }
         Kind::Obj => json_object(rng, s, 1),
@@ -584,11 +642,26 @@ fn text_frame(rng: &mut Rng, client: bool) -> String {
     let client_msgs: [(&str, &[(&str, Kind)]); 5] = [
         (
             "publish",
-            &[("name", Kind::Str), ("pubuid", Kind::Int), ("type", Kind::Str), ("properties", Kind::Obj)],
+            &[
+                ("name", Kind::Str),
+                ("pubuid", Kind::Int),
+                ("type", Kind::Str),
+                ("properties", Kind::Obj),
+            ],
         ),
         ("unpublish", &[("pubuid", Kind::Int)]),
-        ("setproperties", &[("name", Kind::Str), ("update", Kind::Obj)]),
-        ("subscribe", &[("subuid", Kind::Int), ("topics", Kind::Strs), ("options", Kind::Opts)]),
+        (
+            "setproperties",
+            &[("name", Kind::Str), ("update", Kind::Obj)],
+        ),
+        (
+            "subscribe",
+            &[
+                ("subuid", Kind::Int),
+                ("topics", Kind::Strs),
+                ("options", Kind::Opts),
+            ],
+        ),
         ("unsubscribe", &[("subuid", Kind::Int)]),
     ];
     let server_msgs: [(&str, &[(&str, Kind)]); 3] = [
@@ -603,9 +676,20 @@ fn text_frame(rng: &mut Rng, client: bool) -> String {
             ],
         ),
         ("unannounce", &[("name", Kind::Str), ("id", Kind::Int)]),
-        ("properties", &[("name", Kind::Str), ("update", Kind::Obj), ("ack", Kind::Bool)]),
+        (
+            "properties",
+            &[
+                ("name", Kind::Str),
+                ("update", Kind::Obj),
+                ("ack", Kind::Bool),
+            ],
+        ),
     ];
-    let msgs: &[(&str, &[(&str, Kind)])] = if client != rng.one_in(15) { &client_msgs } else { &server_msgs };
+    let msgs: &[(&str, &[(&str, Kind)])] = if client != rng.one_in(15) {
+        &client_msgs
+    } else {
+        &server_msgs
+    };
 
     if rng.one_in(40) {
         let mut s = String::new();

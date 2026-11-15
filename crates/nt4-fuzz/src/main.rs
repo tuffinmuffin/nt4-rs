@@ -137,7 +137,12 @@ fn run() {
             }
         }
         if took > Duration::from_secs(1) {
-            println!("slow: {} ms on a {}-byte {} frame", took.as_millis(), input.len(), target.name());
+            println!(
+                "slow: {} ms on a {}-byte {} frame",
+                took.as_millis(),
+                input.len(),
+                target.name()
+            );
         }
     }
 
@@ -160,7 +165,10 @@ fn run() {
         println!(
             "\nntcore threw {what:?} on {count} {} frames (nt4 handled them), e.g. {}",
             target.name(),
-            String::from_utf8_lossy(input).chars().take(300).collect::<String>()
+            String::from_utf8_lossy(input)
+                .chars()
+                .take(300)
+                .collect::<String>()
         );
     }
     if found.is_empty() {
@@ -175,11 +183,24 @@ fn run() {
             shrink(m.target, input, signature, 3_000)
         };
         println!("\n[{n}] {signature} ({count} frames)");
-        println!("  {} input, shrunk to {} bytes:", m.target.name(), small.len());
+        println!(
+            "  {} input, shrunk to {} bytes:",
+            m.target.name(),
+            small.len()
+        );
         if m.target == Target::Binary {
-            println!("  {}", small.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            println!(
+                "  {}",
+                small.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            );
         } else {
-            println!("  {}", String::from_utf8_lossy(&small).chars().take(400).collect::<String>());
+            println!(
+                "  {}",
+                String::from_utf8_lossy(&small)
+                    .chars()
+                    .take(400)
+                    .collect::<String>()
+            );
         }
         if let Err(again) = check(m.target, &small) {
             println!("  nt4:    {}", truncate(&again.ours.to_string()));
