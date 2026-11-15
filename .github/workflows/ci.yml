@@ -123,6 +123,43 @@ jobs:
           path: fuzz-findings
           if-no-files-found: ignore
 
+  # Performance regressions: count CPU instructions (Callgrind, through
+  # gungraun) for the hot paths in crates/nt4-perf, on the base branch and on
+  # this PR, in the same job. Counts don't depend on how busy the runner is,
+  # so this fails only when the code does more work: more than 5% more
+  # instructions on any benchmark.
+  perf:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GUNGRAUN_RUNNER_VERSION: 0.20.0 # must match gungraun in crates/nt4-perf
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - run: cargo install gungraun-runner --version "$GUNGRAUN_RUNNER_VERSION" --locked
+      - name: Benchmark the base branch
+        id: base
+        run: |
+          git worktree add -q ../base "${{ github.event.pull_request.base.sha }}"
+          if [ -d ../base/crates/nt4-perf ]; then
+            (cd ../base && cargo bench -p nt4-perf --bench hot_paths -- --save-baseline=base)
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The base branch has no crates/nt4-perf yet; nothing to compare."
+          fi
+      - name: Benchmark this PR and compare
+        run: |
+          if [ "${{ steps.base.outputs.have }}" = "true" ]; then
+            cargo bench -p nt4-perf --bench hot_paths -- --baseline=base --callgrind-limits='ir=5%'
+          else
+            cargo bench -p nt4-perf --bench hot_paths
+          fi
+
   # Every tracked ntcore test case is ported or listed as not applicable.
   upstream-audit:
     runs-on: ubuntu-latest

@@ -76,12 +76,31 @@ over the three targets, and the whole job takes about 1.5 minutes. The seed
 is the run id, printed on the first line, so a failure reproduces locally
 with `--seed`. See `crates/nt4-fuzz/README.md` for longer local runs.
 
+## Performance regression checks
+
+`crates/nt4-perf` counts CPU instructions (Callgrind, through gungraun) for
+the hot paths: binary decode and encode, announce decode, publish encode, and
+`ClientCore` receiving and publishing one 20 ms robot loop. The `perf` CI job
+benchmarks the base branch and the PR in the same job and fails if any
+benchmark uses more than 5% more instructions. Counts don't depend on how busy
+the runner is, so a failure means the code does more work. See
+`crates/nt4-perf/README.md` for the numbers and how to run it locally.
+
+One thing it shows: `ClientCore` spends about 8,300 instructions per value
+when publishing, against about 1,300 when receiving. That may be worth a look.
+
+Still to do: a blocking load check in CI that runs the `bench/` robot
+simulation at 200 topics and fails on any lost value, missing one-time value,
+or a first snapshot slower than a loose limit. It waits until PR #3's move to
+pyntcore 2027 alpha 8 lands, since that changes the same `bench/` files.
+
 ## Next steps
 
 1. **Review and merge PR #3.**
 2. **Report the `1e400` ntcore bug to allwpilib** (2026 branch only).
-3. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
-   once it exists.
+3. **Add the load check to CI** (above), after the pyntcore 2027 move.
+4. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
+   once it exists, and add server benchmarks to `nt4-perf`.
 
 ## Picking this up locally
 

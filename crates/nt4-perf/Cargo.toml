@@ -1,0 +1,26 @@
+[package]
+name = "nt4-perf"
+description = "Instruction-count benchmarks for the nt4 hot paths, run in CI (not published)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+nt4-proto = { path = "../nt4-proto" }
+nt4-core = { path = "../nt4-core" }
+serde_json.workspace = true
+
+# Linux only: Callgrind (valgrind) is how the benchmarks count instructions.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Keep in step with the gungraun-runner version installed in CI (ci.yml).
+gungraun = "=0.20.0"
+
+[[bench]]
+name = "hot_paths"
+harness = false
+
+[lints]
+workspace = true
