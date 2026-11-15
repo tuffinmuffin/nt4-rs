@@ -52,23 +52,35 @@ Fixed in `nt4-proto` as a result:
 - `-0` integer literals in JSON text frames now parse as 0, as in ntcore.
 - Integer id fields above `i64::MAX` are now rejected as out of range instead
   of wrapping.
+- JSON numbers now parse exactly (serde_json `float_roundtrip`), as ntcore's
+  do; some doubles decoded one step low before.
+
+`crates/nt4-proto/tests/fuzz_regressions.rs` keeps the inputs behind each fix.
 
 Intentional differences from ntcore (JSON nesting limit, out-of-range
 `periodic`, ids above `i64::MAX`, ntcore's unsubscribe error-text typo) are
 listed in the fuzzer README.
 
-It also found an ntcore bug: number literals such as `1e400` in a JSON text
-frame make ntcore's `WireDecodeText` throw an uncaught exception, which ends
-the process. `nt4-proto` handles these frames. This has not been reported to
-WPILib yet.
+It also found an ntcore bug: ntcore 2026.2.2 ends its process on a JSON text
+frame holding a number too large for a double, such as `[1e400]`. Its JSON
+parser throws `out_of_range`, and `WireDecodeText` only catches
+`parse_error`. ntcore 2027 (alpha 8) uses a different JSON parser and is not
+affected. `nt4-proto` handles these frames. A write-up for WPILib is in
+progress.
+
+### Running it
+
+CI runs the fuzzer with the ntcore oracle for 60 seconds on each push (the
+`fuzz` job, Linux only). That is about 115,000 frames, spread over the three
+targets. The seed is the run id, printed on the first line, so a failure
+reproduces locally with `--seed`. Locally, a release build takes about 10
+seconds; see `crates/nt4-fuzz/README.md` for longer runs.
 
 ## Next steps
 
 1. **Review and merge PR #3.**
-2. **Report the `1e400` ntcore bug to allwpilib**, with the reproducer from
-   `crates/nt4-fuzz/README.md`.
-3. **Optionally run the fuzzer in CI** for a short time on each push.
-4. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
+2. **Report the `1e400` ntcore bug to allwpilib** (2026 branch only).
+3. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
    once it exists.
 
 ## Picking this up locally
