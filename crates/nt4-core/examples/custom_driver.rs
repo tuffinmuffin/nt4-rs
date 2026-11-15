@@ -1,8 +1,14 @@
-//! Drive `ClientCore` by hand with a blocking WebSocket and no async
-//! runtime, to show what the `nt4` crate does for you.
+//! Advanced: drive `ClientCore` yourself, for writing your own runtime.
+//!
+//! Most programs should not do this. Use the `nt4` crate's `Client`, which
+//! runs this loop in a background task for you (see its `watch` and
+//! `sync_loop` examples). This example is for porting the protocol to
+//! another runtime, an embedded target, or a browser, and shows the whole
+//! contract in one place. It uses a blocking socket only to keep the code
+//! short; a real driver would wait on the socket and the tick together.
 //!
 //! ```text
-//! cargo run -p nt4-core --example blocking_client -- 127.0.0.1 /SmartDashboard/
+//! cargo run -p nt4-core --example custom_driver -- 127.0.0.1 /SmartDashboard/
 //! ```
 //!
 //! The loop is: read a frame (with a short timeout) and hand it to the
@@ -36,7 +42,7 @@ fn main() {
     // The core never reads a clock: we give it microseconds since start.
     let now_us = || start.elapsed().as_micros() as i64 + 1;
 
-    let url = nt4_proto::client_url(&host, nt4_proto::ROBOT_CODE_PORT, "blocking-client");
+    let url = nt4_proto::client_url(&host, nt4_proto::ROBOT_CODE_PORT, "custom-driver");
     let mut request = url.into_client_request().expect("valid URL");
     request.headers_mut().insert(
         "Sec-WebSocket-Protocol",

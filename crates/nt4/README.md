@@ -69,6 +69,7 @@ with `pip install pyntcore`), then:
 
 | Example | What it does |
 | --- | --- |
+| `cargo run -p nt4 --example sync_loop -- 127.0.0.1` | uses the client from a plain (non-async) 50 Hz loop, the way robot code uses ntcore |
 | `cargo run -p nt4 --example watch -- 127.0.0.1 /` | prints every topic and value under a prefix; pass a team number instead of a host to find a robot |
 | `cargo run -p nt4 --example publish -- 127.0.0.1` | publishes a counter and a sine wave, and reads a gain other clients can set |
 | `cargo run -p nt4 --example struct_topic -- 127.0.0.1` | publishes a `Translation2d` struct with its schema |
@@ -81,8 +82,14 @@ with `pip install pyntcore`), then:
 | [`nt4-core`](https://docs.rs/nt4-core) | the protocol as a state machine with no sockets or clock (works in WASM) |
 | `nt4` | this crate: tokio, WebSocket, clock, typed API |
 
-Use `nt4-core` directly to run the protocol on another runtime; its
-`blocking_client` example does it with a plain blocking socket.
+A background task owns the socket and keeps a local copy of each
+subscribed topic, so `Subscriber::get` and `Publisher::set` are plain,
+non-blocking calls that never touch the network, as in ntcore for Java and
+C++. Only starting the client needs a tokio runtime; the `sync_loop` example
+shows a normal non-async program.
+
+To run the protocol on another runtime, use `nt4-core` directly (its
+`custom_driver` example shows the loop).
 
 A server (`server` feature) is planned.
 

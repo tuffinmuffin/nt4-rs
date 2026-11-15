@@ -33,7 +33,9 @@ subscriptions again after a reconnect.
 Its behavior follows WPILib's ntcore, and its tests port ntcore's
 `NetworkOutgoingQueueTest` and `TimeSyncTest`.
 
-Example: `cargo run -p nt4-core --example blocking_client -- 127.0.0.1 /`.
+Example (advanced): `cargo run -p nt4-core --example custom_driver -- 127.0.0.1 /`
+drives the core by hand, to show what a runtime has to do. For normal use,
+see the `nt4` crate's examples.
 
 License: MIT. Ported WPILib tests keep WPILib's BSD license
 (`tests/LICENSE-WPILIB.md`).
