@@ -19,9 +19,12 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 
 The load benchmark (`bench/`, results in `bench/README.md`) runs nt4 and
 pyntcore 2027.0.0a8 against a simulated robot of 200 topics (one-time values,
-values set every 20 ms, and a busy loop), scalable to 1,640 topics. No values
-were lost in any run, and with no per-value code nt4 used less CPU and memory
-than C++ ntcore.
+values set every 20 ms, and a busy loop), scalable to 1,640 topics. nt4 lost
+no values in any run. Over a network address, with no per-value code, nt4
+used less CPU and memory than C++ ntcore. On localhost ntcore 2027 sends one
+frame per value, and there nt4 uses more CPU than ntcore at high rates (71%
+against 49% of a core at 157,000 frames/s); nt4's cost per frame is worth a
+look.
 
 It also found three problems, fixed in PR #3:
 
