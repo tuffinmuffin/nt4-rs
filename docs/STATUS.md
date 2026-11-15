@@ -11,8 +11,8 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 | 1 | `nt4-proto`: wire format, all ntcore `WireEncoderTest` / `WireDecoderTest` cases ported | Merged (PR #1) |
 | 2 | `nt4-core`: sans-I/O `ClientCore`, `TimeSync`, `OutgoingQueue`; `NetworkOutgoingQueueTest` and client `TimeSyncTest` cases ported | Merged (PR #2) |
 | 3 | `nt4`: tokio `Client`, typed publishers and subscribers, pyntcore interop tests, load benchmark, decoder fuzzer, crates.io readiness | Merged (PRs #3 to #7) |
-| 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | In review (branch `claude/server-core`) |
-| 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients, the `TimeSyncTest` server case | Not started |
+| 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | Merged (PR #8) |
+| 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | In review (branch `claude/server-runtime`) |
 | 6 | Release and publish to crates.io | Not started |
 
 ## Milestone 4: `ServerCore`
@@ -55,11 +55,63 @@ Where it departs from ntcore, on purpose:
 - `$clients` updates on `add_client` and `remove_client`; in ntcore the
   network layer calls `ConnectionsChanged`.
 
-Left for milestone 5: the persistence file (`DumpPersistent` /
-`LoadPersistent` and the persistent-changed flag, with `NetworkServerTest`),
-connections that use only the RTT subprotocol, the `TimeSyncTest`
-server case, server benchmarks in `nt4-perf`, and interop with pyntcore
-clients.
+## Milestone 5: the server runtime
+
+`nt4`'s `server` feature adds `nt4::Server` (`crates/nt4/src/server.rs`):
+
+- It listens (port 5810 by default) and checks each upgrade as ntcore's
+  `NetworkServer` does: the path must be `/nt/<name>` (percent-decoded, not
+  empty) or it gets a 404, and the subprotocol is NT 4.1, then 4.0, then
+  RTT-only (anything else gets a 400; none at all means 4.0). RTT-only
+  connections just answer time pings and aren't clients. Peers on loopback
+  are local (sent to without batching, as ntcore 2027 does).
+- One task per connection, all sharing one `ServerCore`. A task takes frames
+  from the core only when its socket has room, so a slow client's values
+  keep coalescing in the core's queue instead of piling up in a channel.
+- The server's own code uses the same typed `Publisher` / `Subscriber`
+  handles as `Client` (they moved to `handles.rs`), plus `Server::events`.
+- Persistent values: `ServerConfig::persist_file` loads and saves ntcore's
+  file format. `ServerCore::dump_persistent` matches ntcore byte for byte
+  (wpiutil's number format and escaping, and its odd layout for properties
+  with several keys); an interop test has ntcore save a file of awkward
+  values and checks that loading and dumping it gives the same bytes. The
+  runtime follows `NetworkServer`: restore `<file>.bck` if the file is
+  missing, back up an unreadable file to `.bak`, save once a second through
+  `.tmp` and `.bck`, CRLF line ends on Windows as ntcore's text mode gives.
+
+Tests: `tests/server.rs` (our client against our server, the RTT
+subprotocol, a refused handshake); `tests/interop_server.rs` (pyntcore
+clients against our server: connect and time sync, every type both ways,
+a relay between two ntcore clients, unpublish, retained topics, meta topics,
+reconnect after a restart, the batched path over the machine's network
+address, and the persistent file); `tests/persistent.rs` ports
+`NetworkServerTest`'s four cases and adds saving tests. `nt4-perf` has a
+`server_relay` benchmark. CI now builds, lints, documents and tests with
+`--all-features`, since nt4's client and server are both optional.
+
+Where it departs from ntcore, on purpose:
+
+- When the server is dropped, it saves persistent values one last time;
+  ntcore only saves on its 1 s timer.
+- An unreadable persistent file is backed up and replaced as in ntcore, but
+  a missing one is just created (ntcore also "backs up" the missing file,
+  which does nothing), and a file with bad UTF-8 is read with replacement
+  characters instead of being replaced.
+- An array in the persistent file with elements of the wrong type loads
+  without them, as in ntcore, but the error is reported (ntcore sets it and
+  then drops it).
+- No HTTP pages: ntcore answers a plain `GET /` and
+  `GET /nt/persistent.json`; nt4 only takes WebSocket upgrades.
+- `TimeSyncTest TestServer` is listed as not applicable: it switches one
+  ntcore instance to server mode, while nt4's `Server` is its own type and
+  always runs on server time.
+
+Found in ntcore along the way: on Windows, ntcore's persistent file writes
+characters above U+FFFF wrongly (😀 becomes a lone `\uf600`), because
+wpiutil's JSON writer decodes UTF-8 into `wint_t`, which is 16 bits there.
+nt4 writes the surrogate pair. A persistent infinite double is written as
+`1e5000` by both; nt4's loader (serde_json) can't read that number back, so
+such a file fails to load in nt4.
 
 ## What PR #3 found
 
@@ -161,13 +213,14 @@ check is enough.
 
 ## Next steps
 
-1. **Review and merge the milestone 4 PR** (`claude/server-core`).
-2. **Milestone 5: the server runtime.** A tokio server on 5810 around
-   `ServerCore`, the persistence file, pyntcore clients against it in CI,
-   and server benchmarks in `nt4-perf`.
+1. **Review and merge the milestone 5 PR** (`claude/server-runtime`).
+2. **Milestone 6: release.** Publish the crates to crates.io (the plan's
+   open question), struct and protobuf schema helpers, and manual checks
+   with AdvantageScope and Elastic against `nt4::Server` (the `server`
+   example).
 3. **Report the ntcore bugs to allwpilib** (`main`): the two parser bugs
-   below, and the two server ones above (the missing `ack`, and the stale
-   announce flag).
+   below, the two server ones above (the missing `ack`, and the stale
+   announce flag), and the Windows persistent-file bug.
 4. **Look at nt4's cost per frame** on localhost and per published value
    (see the benchmark notes below).
 
@@ -175,7 +228,7 @@ check is enough.
 
 ```bash
 git clone https://github.com/tuffinmuffin/nt4-rs && cd nt4-rs
-git switch claude/server-core   # milestone 4, until it merges
+git switch claude/server-runtime   # milestone 5, until it merges
 cargo test --workspace
 ```
 

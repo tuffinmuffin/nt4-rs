@@ -65,7 +65,10 @@ println!("{:?} from {} clients", speed.get(), server.clients().len());
 ```
 
 Clients on the same machine (`127.x`) get every value right away, others
-get them batched per subscription period, as with ntcore 2027.
+get them batched per subscription period, as with ntcore 2027. Set
+`ServerConfig::persist_file` (robot code uses `networktables.json`) to keep
+topics with the `persistent` property across restarts, in ntcore's file
+format.
 `Server::events()` reports what reaches the server's own subscriptions, and
 warnings about what clients send.
 

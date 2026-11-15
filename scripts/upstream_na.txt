@@ -1,5 +1,5 @@
 # ntcore test cases that don't apply to this crate, one per line, with why.
 WireEncoderTextTest ServerMessageEmpty   # Rust enums can't be empty
 WireEncoderTextTest ServerMessageValue   # values are binary frames, not a text message variant
-TimeSyncTest TestServer                  # an instance started and stopped as a server; port with the server runtime (milestone 5)
+TimeSyncTest TestServer                  # an instance switching to server mode (offset 0); nt4's Server is its own type and always runs on server time (Server::now_us)
 ServerImplTest AddClient3                # NT3 clients; nt4 speaks NT4 only (the upstream case is empty)

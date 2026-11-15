@@ -5,7 +5,7 @@ on stdout. The Rust tests in tests/interop.rs drive it; run it by hand with
 `python -u ntcore_peer.py` and type commands to try it.
 
 Commands (the peer is an ntcore server or an ntcore client):
-  {"cmd": "start_server", "port": 5810}
+  {"cmd": "start_server", "port": 5810, "persist": "networktables.json"}
   {"cmd": "stop_server"}
   {"cmd": "start_client", "name": "dash", "port": 5810, "host": "127.0.0.1"}
   {"cmd": "stop_client"}
@@ -31,6 +31,10 @@ import sys
 import time
 
 import ntcore
+
+# The tests speak UTF-8 JSON; Windows would read stdin as its ANSI code page.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 
 inst = ntcore.NetworkTableInstance.create()
 publishers = {}
@@ -70,7 +74,7 @@ def subscriber(name):
 def handle(cmd):
     c = cmd["cmd"]
     if c == "start_server":
-        inst.start_server("", "127.0.0.1", "", cmd["port"])
+        inst.start_server(cmd.get("persist", ""), "127.0.0.1", "", cmd["port"])
         return {"ok": True}
     if c == "stop_server":
         inst.stop_server()

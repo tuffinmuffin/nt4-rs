@@ -26,6 +26,7 @@ async fn server() -> Server {
     Server::start(ServerConfig {
         listen_address: "127.0.0.1".parse().unwrap(),
         port: 0,
+        ..Default::default()
     })
     .await
     .unwrap()
@@ -361,6 +362,7 @@ async fn ntcore_client_reconnects_after_server_restart() {
     let server = Server::start(ServerConfig {
         listen_address: "127.0.0.1".parse().unwrap(),
         port,
+        ..Default::default()
     })
     .await
     .unwrap();
@@ -389,6 +391,7 @@ async fn batched_path_relays_values() {
     let server = Server::start(ServerConfig {
         listen_address: ip,
         port: 0,
+        ..Default::default()
     })
     .await
     .unwrap();
@@ -426,4 +429,93 @@ async fn batched_path_relays_values() {
             .all(|c| !c.address.ip().is_loopback())
     );
     assert_eq!(warnings(&mut events), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn persistent_file_matches_ntcore_byte_for_byte() {
+    // ntcore saves a file of awkward values; our core loads it and dumps it
+    // again, and must write exactly the same bytes.
+    let Some(mut peer) = Peer::spawn().await else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("nt4-persist-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("networktables.json");
+    let _ = std::fs::remove_file(&file);
+    let port = peer.port4;
+    peer.cmd(json!({"cmd": "start_server", "port": port, "persist": file.to_str().unwrap()}))
+        .await;
+    let values = [
+        ("/p/double", "double", json!(0.1)),
+        ("/p/big", "double", json!(1e21)),
+        ("/p/tiny", "double", json!(1.5e-7)),
+        ("/p/negzero", "double", json!(-0.0)),
+        ("/p/int", "int", json!(-42)),
+        ("/p/bool", "boolean", json!(true)),
+        ("/p/float", "float", json!(0.1)),
+        // ntcore on Windows writes characters above U+FFFF wrongly (😀 as
+        // a lone : wpiutil's JSON writer decodes UTF-8 into a 16-bit
+        // `wint_t` there), so leave them out on Windows. nt4 writes the
+        // surrogate pair everywhere.
+        (
+            "/p/string",
+            "string",
+            json!(if cfg!(windows) {
+                "a/b<é\"\n&'=>"
+            } else {
+                "a/b<é😀\"\n&'=>"
+            }),
+        ),
+        ("/p/raw", "raw", json!([0, 255, 7, 128])),
+        ("/p/da", "double[]", json!([0.5, 1e-7, 3.0])),
+        ("/p/fa", "float[]", json!([0.25, 0.1])),
+        ("/p/ia", "int[]", json!([1, -2, i64::MAX])),
+        ("/p/ba", "boolean[]", json!([true, false])),
+        ("/p/sa", "string[]", json!(["x/y", "é", ""])),
+    ];
+    for (name, ty, value) in &values {
+        peer.cmd(json!({"cmd": "publish", "name": name, "type": ty, "value": value}))
+            .await;
+        peer.cmd(
+            json!({"cmd": "set_properties", "name": name, "properties": {"persistent": true}}),
+        )
+        .await;
+    }
+    // More than one property puts the object on several lines.
+    peer.cmd(json!({"cmd": "set_properties", "name": "/p/double", "properties": {"units": "m", "max": 2.5}}))
+        .await;
+
+    // ntcore saves once a second when something changed.
+    let mut text = String::new();
+    for _ in 0..100 {
+        text = std::fs::read_to_string(&file).unwrap_or_default();
+        if values
+            .iter()
+            .all(|(n, _, _)| text.contains(&n.replace('/', r"\/")))
+            && text.contains("units")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(text.contains("units"), "ntcore never saved: {text}");
+
+    // Real UTF-8 reached ntcore: é (and off Windows the emoji's surrogate
+    // pair), escaped.
+    let esc = |hex: &str| format!("{}u{hex}", '\\');
+    assert!(text.contains(&esc("00e9")), "{text}");
+    if !cfg!(windows) {
+        assert!(
+            text.contains(&format!("{}{}", esc("d83d"), esc("de00"))),
+            "{text}"
+        );
+    }
+
+    let mut core = nt4::core::ServerCore::new();
+    let errors = core.load_persistent(&text, 1);
+    assert_eq!(errors, Vec::<String>::new());
+    // ntcore writes the file in text mode, so with CRLF on Windows; the
+    // core's dump uses LF and the server runtime converts on Windows.
+    assert_eq!(core.dump_persistent(), text.replace("\r\n", "\n"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

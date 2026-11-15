@@ -22,7 +22,9 @@
 //! ```
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -54,7 +56,7 @@ use crate::handles::{
 /// Largest WebSocket message accepted, as in ntcore (2 MiB).
 const MAX_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
 
-/// Where to listen.
+/// Where to listen, and where to keep persistent values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     /// Address to listen on; `0.0.0.0` (the default) is every IPv4
@@ -63,14 +65,20 @@ pub struct ServerConfig {
     /// TCP port; 5810 is robot code's, and 0 picks a free one (see
     /// [`Server::local_addr`]).
     pub port: u16,
+    /// The file for topics with the `persistent` property, in ntcore's
+    /// format (robot code uses `networktables.json`). Loaded at start and
+    /// saved within a second of a change, and when the server stops.
+    /// `None` (the default) keeps them in memory only.
+    pub persist_file: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
-    /// Every interface, port 5810.
+    /// Every interface, port 5810, no persistent file.
     fn default() -> Self {
         Self {
             listen_address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             port: nt4_proto::ROBOT_CODE_PORT,
+            persist_file: None,
         }
     }
 }
@@ -119,6 +127,8 @@ struct State {
 struct Shared {
     state: Mutex<State>,
     start: Instant,
+    /// Problems loading the persistent file at start.
+    load_errors: Vec<String>,
 }
 
 impl Shared {
@@ -186,12 +196,23 @@ impl Backend for Shared {
 }
 
 /// Stops the accept loop and every connection when the last [`Server`]
-/// handle is dropped.
-struct StopGuard(watch::Sender<bool>);
+/// handle is dropped, and saves persistent values one last time.
+struct StopGuard {
+    stop: watch::Sender<bool>,
+    persist: Option<(Arc<Shared>, PathBuf)>,
+}
 
 impl Drop for StopGuard {
     fn drop(&mut self) {
-        let _ = self.0.send(true);
+        let _ = self.stop.send(true);
+        // ntcore saves only on its 1 s timer; save what changed since, so
+        // the last second isn't lost. It's a small file, written here
+        // rather than in a task the runtime may no longer run.
+        if let Some((shared, path)) = &self.persist
+            && let Some(data) = shared.take_persistent()
+        {
+            let _ = save_persistent(path, &data);
+        }
     }
 }
 
@@ -226,22 +247,48 @@ impl Server {
     pub async fn start(config: ServerConfig) -> std::io::Result<Self> {
         let listener = TcpListener::bind((config.listen_address, config.port)).await?;
         let local_addr = listener.local_addr()?;
+        let start = Instant::now();
+        let mut core = ServerCore::new();
+        let mut load_errors = Vec::new();
+        if let Some(path) = config.persist_file.clone() {
+            let (data, notes) = tokio::task::spawn_blocking(move || read_persistent(&path))
+                .await
+                .unwrap_or_default();
+            load_errors = notes;
+            let now = i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX) + 1;
+            load_errors.extend(core.load_persistent(&data, now));
+        }
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
-                core: ServerCore::new(),
+                core,
                 conns: HashMap::new(),
                 watchers: HashMap::new(),
                 listeners: Vec::new(),
             }),
-            start: Instant::now(),
+            start,
+            load_errors,
         });
         let (stop_tx, stop_rx) = watch::channel(false);
-        tokio::spawn(accept_loop(shared.clone(), listener, stop_rx));
+        tokio::spawn(accept_loop(shared.clone(), listener, stop_rx.clone()));
+        let persist = config.persist_file.map(|path| {
+            tokio::spawn(save_loop(shared.clone(), path.clone(), stop_rx));
+            (shared.clone(), path)
+        });
         Ok(Self {
             shared,
             local_addr,
-            _stop: Arc::new(StopGuard(stop_tx)),
+            _stop: Arc::new(StopGuard {
+                stop: stop_tx,
+                persist,
+            }),
         })
+    }
+
+    /// Problems found loading the persistent file at start, in ntcore's
+    /// words (`"<index>: <error>"` for a bad entry). Entries with a problem
+    /// were skipped; the rest loaded.
+    pub fn persistent_load_errors(&self) -> &[String] {
+        &self.shared.load_errors
     }
 
     /// The address it listens on, with the real port when started with 0.
@@ -381,6 +428,115 @@ impl Server {
     pub fn now_us(&self) -> i64 {
         self.shared.now_us()
     }
+}
+
+// ----- Persistent file -----
+
+impl Shared {
+    /// The persistent values to save, if they changed since the last time.
+    fn take_persistent(&self) -> Option<String> {
+        let mut state = self.lock();
+        state
+            .core
+            .persistent_changed()
+            .then(|| state.core.dump_persistent())
+    }
+
+    /// Tell [`Server::events`] listeners about a problem outside the core.
+    fn warn(&self, msg: String) {
+        self.lock()
+            .listeners
+            .retain(|l| l.send(ServerEvent::Warning(msg.clone())).is_ok());
+    }
+}
+
+/// Save once a second when something changed, as ntcore does.
+async fn save_loop(shared: Arc<Shared>, path: PathBuf, mut stop: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = stop.changed() => return,
+        }
+        if let Some(data) = shared.take_persistent() {
+            let p = path.clone();
+            if let Ok(Err(e)) =
+                tokio::task::spawn_blocking(move || save_persistent(&p, &data)).await
+            {
+                shared.warn(format!(
+                    "could not write persistent file '{}': {e}",
+                    path.display()
+                ));
+            }
+        }
+    }
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = OsString::from(path.as_os_str());
+    s.push(suffix);
+    s.into()
+}
+
+/// ntcore opens the file in text mode, so it has CRLF line ends on
+/// Windows; write it the same way.
+fn platform_newlines(data: &str) -> String {
+    if cfg!(windows) {
+        data.replace('\n', "\r\n")
+    } else {
+        data.to_owned()
+    }
+}
+
+/// Read the persistent file as ntcore's `LoadPersistent` does: if a save
+/// was interrupted after the old file became `<file>.bck`, restore that
+/// first. If the file can't be read, back it up to `<file>.bak` and write
+/// an empty list so this doesn't happen again. Returns the contents and
+/// notes about what went wrong.
+fn read_persistent(path: &Path) -> (String, Vec<String>) {
+    let mut notes = Vec::new();
+    let bck = with_suffix(path, ".bck");
+    if !path.exists()
+        && bck.exists()
+        && let Err(e) = std::fs::rename(&bck, path)
+    {
+        notes.push(format!("failed to restore backup '{}': {e}", bck.display()));
+    }
+    match std::fs::read(path) {
+        // Bad UTF-8 becomes replacement characters (and those entries
+        // likely fail to parse) rather than losing the whole file.
+        Ok(bytes) => (String::from_utf8_lossy(&bytes).into_owned(), notes),
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                notes.push(format!(
+                    "could not open persistent file '{}': {e}",
+                    path.display()
+                ));
+                let _ = std::fs::copy(path, with_suffix(path, ".bak"));
+            }
+            let _ = std::fs::write(path, platform_newlines("[]\n"));
+            (String::new(), notes)
+        }
+    }
+}
+
+/// Save as ntcore's `SavePersistent` does: write `<file>.tmp`, move the old
+/// file to `<file>.bck`, then move the new one in place (and put the old
+/// one back if that fails).
+fn save_persistent(path: &Path, data: &str) -> std::io::Result<()> {
+    let tmp = with_suffix(path, ".tmp");
+    if let Err(e) = std::fs::write(&tmp, platform_newlines(data)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    let bck = with_suffix(path, ".bck");
+    let _ = std::fs::remove_file(&bck);
+    let _ = std::fs::rename(path, &bck);
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::rename(&bck, path);
+        return Err(e);
+    }
+    Ok(())
 }
 
 // ----- Connections -----

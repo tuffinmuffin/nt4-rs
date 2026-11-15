@@ -11,7 +11,7 @@
 //! assert_eq!(batch.len(), 150);
 //! ```
 
-use nt4_core::{ClientCore, ProtocolVersion, PubId, PublishOptions};
+use nt4_core::{ClientCore, ClientId, ProtocolVersion, PubId, PublishOptions, ServerCore};
 use nt4_proto::{
     BinaryMessage, ClientMessage, NtType, Properties, ServerMessage, SubscriptionOptions, Value,
     encode_binary, encode_text_frame,
@@ -220,4 +220,38 @@ pub fn publishing_client() -> (ClientCore, Vec<(PubId, Value)>) {
     core.send_outgoing(0, true);
     drain(&mut core);
     (core, periodic)
+}
+
+/// A server relaying a robot to a dashboard: the robot client publishes all
+/// [`TOPICS`] topics (pubuids 1 to 200, so [`periodic_frame`] is also its
+/// value frame) and the dashboard subscribes to `/robot/` with `all`.
+/// Returns the server, the robot and the dashboard.
+///
+/// ```
+/// let (mut server, robot, dash) = nt4_perf::relaying_server();
+/// server.handle_binary(robot, 20_000, &nt4_perf::periodic_frame());
+/// server.send_outgoing(dash, 20_000, true);
+/// assert!(server.poll_transmit(dash).is_some());
+/// ```
+pub fn relaying_server() -> (ServerCore, ClientId, ClientId) {
+    let mut server = ServerCore::new();
+    let (robot, _) = server.add_client("robot", "10.0.0.2:1", false, ProtocolVersion::V4_1);
+    let (dash, _) = server.add_client("dash", "10.0.0.5:2", false, ProtocolVersion::V4_1);
+    let subscribe = ClientMessage::Subscribe {
+        subuid: 1,
+        topics: vec!["/robot/".into()],
+        options: SubscriptionOptions {
+            prefix: true,
+            all: true,
+            ..Default::default()
+        },
+    };
+    server.handle_text(dash, 0, &encode_text_frame(&[subscribe]));
+    server.handle_text(robot, 0, &encode_text_frame(&publish_messages()));
+    server.send_all_outgoing(0, true);
+    for id in [robot, dash] {
+        while server.poll_transmit(id).is_some() {}
+    }
+    while server.poll_event().is_some() {}
+    (server, robot, dash)
 }

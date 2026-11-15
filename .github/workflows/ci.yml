@@ -72,7 +72,8 @@ jobs:
       # nt4-fuzz is a dev tool (publish = false) with no MSRV guarantee.
       - run: cargo test --workspace --all-features --exclude nt4-fuzz
 
-  # Our client against a real ntcore server (pyntcore). Pin the version so a
+  # Our client against a real ntcore server, and real ntcore clients against
+  # our server (pyntcore). Pin the version so a
   # WPILib change shows up as a named failure here.
   interop:
     strategy:
@@ -92,7 +93,7 @@ jobs:
         shell: bash
         run: |
           export NT4_INTEROP_PYTHON="$(python -c 'import sys; print(sys.executable)')"
-          cargo test -p nt4 --all-features --test interop -- --test-threads=1
+          cargo test -p nt4 --all-features --test interop --test interop_server -- --test-threads=1
 
   # Differential fuzzer: nt4-proto's decoders against ntcore's own, from the
   # pyntcore wheel (the oracle builds on Linux only). A short bounded run as

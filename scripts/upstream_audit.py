@@ -23,6 +23,7 @@ TRACKED = [
     "ntcore/src/test/native/cpp/net/NetworkOutgoingQueueTest.cpp",
     "ntcore/src/test/native/cpp/TimeSyncTest.cpp",
     "ntcore/src/test/native/cpp/server/ServerImplTest.cpp",
+    "ntcore/src/test/native/cpp/NetworkServerTest.cpp",
 ]
 
 REPO = pathlib.Path(__file__).resolve().parent.parent

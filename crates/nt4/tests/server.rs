@@ -23,6 +23,7 @@ async fn server() -> Server {
     Server::start(ServerConfig {
         listen_address: "127.0.0.1".parse().unwrap(),
         port: 0,
+        ..Default::default()
     })
     .await
     .unwrap()
@@ -128,6 +129,7 @@ async fn client_reconnects_when_the_server_comes_back() {
     let server = Server::start(ServerConfig {
         listen_address: "127.0.0.1".parse().unwrap(),
         port,
+        ..Default::default()
     })
     .await
     .unwrap();

@@ -51,6 +51,7 @@ pub mod client;
 mod frames;
 mod meta;
 pub mod outgoing;
+mod persistent;
 pub mod server;
 pub mod time_sync;
 
