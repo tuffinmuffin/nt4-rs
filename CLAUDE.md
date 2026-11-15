@@ -20,15 +20,17 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   frames, `NtType`, `Value`). No I/O, no async, no tokio, so it stays usable
   from WASM.
 - `crates/nt4-core`: sans-I/O state machines, same no-I/O rule (CI builds it
-  for `wasm32-unknown-unknown`). `ClientCore` (client), `TimeSync`, and
-  `OutgoingQueue` (ntcore's `NetworkOutgoingQueue`, shared with the server
-  core later). Callers pass the time in microseconds; nothing reads a clock.
+  for `wasm32-unknown-unknown`). `ClientCore` (client), `ServerCore`
+  (ntcore's `ServerImpl`, with the server's own client as slot 0),
+  `TimeSync`, and `OutgoingQueue` (ntcore's `NetworkOutgoingQueue`, used by
+  both). Callers pass the time in microseconds; nothing reads a clock.
 - `crates/nt4`: tokio runtime. `client` feature: `Client` (connect,
   reconnect, frame pump around `ClientCore`) and typed `Publisher<T>` /
   `Subscriber<T>` via `NtValue`. Interop tests in `tests/interop.rs` drive a
   real ntcore through `tests/interop/ntcore_peer.py` (JSON lines on stdin);
   they skip unless `NT4_INTEROP_PYTHON` points at a Python with pyntcore.
-- Planned: `ServerCore` in `nt4-core` and the `server` feature in `nt4`.
+- Planned: the `server` feature in `nt4` (tokio server around `ServerCore`,
+  persistence file).
 
 ## Rules
 

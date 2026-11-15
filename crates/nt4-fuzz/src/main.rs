@@ -15,7 +15,10 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use nt4_fuzz::{Mismatch, Rng, Target, check, drive_client_core, generate, has_oracle, shrink};
+use nt4_fuzz::{
+    Mismatch, Rng, Target, check, drive_client_core, drive_server_core, generate, has_oracle,
+    shrink,
+};
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -96,8 +99,15 @@ fn run() {
         let input = generate(target, &mut rng);
         let t = Instant::now();
         let result = check(target, &input);
-        // ClientCore must survive the same frame.
-        let core_panicked = std::panic::catch_unwind(|| drive_client_core(target, &input)).is_err();
+        // ClientCore and ServerCore must survive the same frame.
+        let core_panicked =
+            if std::panic::catch_unwind(|| drive_client_core(target, &input)).is_err() {
+                Some("ClientCore panicked")
+            } else if std::panic::catch_unwind(|| drive_server_core(target, &input)).is_err() {
+                Some("ServerCore panicked")
+            } else {
+                None
+            };
         let took = t.elapsed();
 
         let s = stats.entry(target.name()).or_default();
@@ -106,9 +116,9 @@ fn run() {
         s.largest = s.largest.max(input.len());
         s.slowest = s.slowest.max(took);
         let result = match (result, core_panicked) {
-            (Ok(_), true) => Err(Mismatch {
+            (Ok(_), Some(which)) => Err(Mismatch {
                 target,
-                signature: "ClientCore panicked".into(),
+                signature: which.into(),
                 ours: serde_json::Value::Null,
                 theirs: serde_json::Value::Null,
             }),

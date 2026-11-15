@@ -2,7 +2,8 @@
 
 Differential fuzzer that runs nt4-proto's decoders and ntcore's own decoders
 (from the pyntcore wheel) on the same generated frames and compares the
-results. It also feeds every frame to `ClientCore` to check for panics.
+results. It also feeds every frame to `ClientCore` and to `ServerCore` (as a
+client's frame) to check for panics.
 
 ## Building
 
@@ -49,7 +50,7 @@ Three targets:
 
 For each frame the fuzzer verifies:
 1. nt4-proto does not panic.
-2. `ClientCore` does not panic on the same frame.
+2. `ClientCore` and `ServerCore` do not panic on the same frame.
 3. nt4-proto's decoded output matches ntcore's output exactly (when the oracle
    is built in).
 
