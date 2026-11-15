@@ -698,6 +698,21 @@ impl ServerCore {
         self.remote_mut(id.0)?.wire.out.pop_front()
     }
 
+    /// Whether [`poll_transmit`](Self::poll_transmit) has a frame for this
+    /// client, so a runtime can wake only the connections with work.
+    ///
+    /// ```
+    /// use nt4_core::{ProtocolVersion, ServerCore};
+    /// let mut server = ServerCore::new();
+    /// let (id, _) = server.add_client("c", "10.0.0.2:1", false, ProtocolVersion::V4_1);
+    /// assert!(!server.has_transmit(id));
+    /// server.send_outgoing(id, 1_000, false); // the first keepalive ping
+    /// assert!(server.has_transmit(id));
+    /// ```
+    pub fn has_transmit(&self, id: ClientId) -> bool {
+        self.remote(id.0).is_some_and(|r| !r.wire.out.is_empty())
+    }
+
     /// The next event, oldest first.
     pub fn poll_event(&mut self) -> Option<Event> {
         self.events.pop_front()

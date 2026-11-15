@@ -1,9 +1,10 @@
 # nt4
 
 A [NetworkTables 4.1](https://github.com/wpilibsuite/allwpilib/blob/main/ntcore/doc/networktables4.adoc)
-client for Rust and tokio. It talks to FRC robot code, the simulator, and
-anything else that runs WPILib's ntcore, the same way AdvantageScope or
-Elastic do.
+client and server for Rust and tokio. The client talks to FRC robot code,
+the simulator, and anything else that runs WPILib's ntcore, the same way
+AdvantageScope or Elastic do. The server (`server` feature) is what those
+connect to, as robot code's ntcore server is.
 
 - Connects by team number or address, keeps the connection alive, and
   reconnects on its own
@@ -11,8 +12,10 @@ Elastic do.
 - Server clock sync, so timestamps line up with the robot's
 - Publishers and subscriptions work before the first connection and come
   back after every reconnect
-- Tested in CI against a real ntcore server (pyntcore) on Linux, Windows and
-  macOS
+- A server that ntcore clients connect to, with retained values, meta
+  topics and the same typed handles for its own topics
+- Tested in CI against real ntcore (pyntcore), as both client and server, on
+  Linux, Windows and macOS
 
 ## Quick start
 
@@ -45,6 +48,27 @@ async fn main() {
 For the simulator or a local server, use
 `ClientConfig::server("my-dashboard", "127.0.0.1", 5810)`.
 
+## Server
+
+```toml
+nt4 = { version = "0.1", features = ["server"] }
+```
+
+```rust,ignore
+use nt4::{Server, ServerConfig};
+
+let server = Server::start(ServerConfig::default()).await?; // port 5810
+let mode = server.publish::<String>("/robot/mode");
+let speed = server.subscribe::<f64>("/dashboard/speed", Default::default());
+mode.set("teleop".into());
+println!("{:?} from {} clients", speed.get(), server.clients().len());
+```
+
+Clients on the same machine (`127.x`) get every value right away, others
+get them batched per subscription period, as with ntcore 2027.
+`Server::events()` reports what reaches the server's own subscriptions, and
+warnings about what clients send.
+
 ## Types
 
 | Rust | NT4 type |
@@ -73,6 +97,7 @@ with `pip install pyntcore`), then:
 | `cargo run -p nt4 --example watch -- 127.0.0.1 /` | prints every topic and value under a prefix; pass a team number instead of a host to find a robot |
 | `cargo run -p nt4 --example publish -- 127.0.0.1` | publishes a counter and a sine wave, and reads a gain other clients can set |
 | `cargo run -p nt4 --example struct_topic -- 127.0.0.1` | publishes a `Translation2d` struct with its schema |
+| `cargo run -p nt4 --features server --example server` | runs a server on 5810 with a few topics; point AdvantageScope, Elastic or the other examples at it |
 
 ## How it fits together
 
@@ -91,11 +116,10 @@ shows a normal non-async program.
 To run the protocol on another runtime, use `nt4-core` directly (its
 `custom_driver` example shows the loop).
 
-A server (`server` feature) is planned.
-
 ## Compatibility
 
-NT 4.1, with fallback to 4.0. Tested against ntcore 2027 (pyntcore 2027.0.0a8);
+NT 4.1, with fallback to 4.0, and the RTT subprotocol on the server.
+Tested against ntcore 2027 (pyntcore 2027.0.0a8);
 ntcore 2026 and older are not tracked. Minimum Rust
 version 1.95.
 

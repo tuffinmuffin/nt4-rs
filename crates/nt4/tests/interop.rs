@@ -10,96 +10,26 @@
 //! NT4_INTEROP_PYTHON=.venv/bin/python cargo test -p nt4 --test interop
 //! ```
 
-use std::process::Stdio;
 use std::time::Duration;
 
-use nt4::{Client, ClientConfig, Event, PublishOptions, SubscriptionOptions};
-use serde_json::{Value as Json, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use nt4::{Event, PublishOptions, SubscriptionOptions};
+use serde_json::json;
 
-struct Peer {
-    _child: Child,
-    stdin: ChildStdin,
-    stdout: Lines<BufReader<ChildStdout>>,
-    port4: u16,
-}
+#[path = "interop/peer.rs"]
+mod peer;
+use peer::{Peer, eventually};
 
-impl Peer {
-    /// Start the peer, or `None` if `NT4_INTEROP_PYTHON` isn't set.
-    async fn start() -> Option<Peer> {
-        let Ok(python) = std::env::var("NT4_INTEROP_PYTHON") else {
-            eprintln!("NT4_INTEROP_PYTHON not set; skipping interop test");
-            return None;
-        };
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/interop/ntcore_peer.py");
-        let mut child = Command::new(python)
-            .args(["-I", "-u", script])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .expect("start python");
-        let stdin = child.stdin.take().unwrap();
-        let stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-        let mut peer = Peer {
-            _child: child,
-            stdin,
-            stdout,
-            port4: free_port(),
-        };
-        peer.start_server().await;
-        Some(peer)
-    }
-
-    async fn cmd(&mut self, cmd: Json) -> Json {
-        let mut line = cmd.to_string();
-        line.push('\n');
-        self.stdin.write_all(line.as_bytes()).await.unwrap();
-        let reply = self.stdout.next_line().await.unwrap().expect("peer reply");
-        let reply: Json = serde_json::from_str(&reply).unwrap();
-        assert_eq!(reply["ok"], true, "{cmd} -> {reply}");
-        reply
-    }
-
-    async fn start_server(&mut self) {
-        let port = self.port4;
-        self.cmd(json!({"cmd": "start_server", "port": port})).await;
-    }
-
-    async fn stop_server(&mut self) {
-        self.cmd(json!({"cmd": "stop_server"})).await;
-    }
-
-    fn client(&self, name: &str) -> Client {
-        let mut config = ClientConfig::server(name, "127.0.0.1", self.port4);
-        config.reconnect_delay = Duration::from_millis(100);
-        Client::start(config)
-    }
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
-/// Poll `f` every 10 ms until it returns `Some`, for up to 5 s.
-async fn eventually<T>(mut f: impl FnMut() -> Option<T>) -> T {
-    for _ in 0..500 {
-        if let Some(v) = f() {
-            return v;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("timed out");
+/// A peer running an ntcore server, or `None` if `NT4_INTEROP_PYTHON` isn't
+/// set.
+async fn server_peer() -> Option<Peer> {
+    let mut peer = Peer::spawn().await?;
+    peer.start_server().await;
+    Some(peer)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn connects_and_syncs_time() {
-    let Some(mut peer) = Peer::start().await else {
+    let Some(mut peer) = server_peer().await else {
         return;
     };
     let client = peer.client("interop-sync");
@@ -127,7 +57,7 @@ async fn connects_and_syncs_time() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reads_server_values() {
-    let Some(mut peer) = Peer::start().await else {
+    let Some(mut peer) = server_peer().await else {
         return;
     };
     peer.cmd(json!({"cmd": "publish", "name": "/srv/d", "type": "double", "value": 1.5}))
@@ -154,7 +84,7 @@ async fn reads_server_values() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn prefix_subscription_sees_announcements() {
-    let Some(mut peer) = Peer::start().await else {
+    let Some(mut peer) = server_peer().await else {
         return;
     };
     let client = peer.client("interop-prefix");
@@ -187,7 +117,7 @@ async fn prefix_subscription_sees_announcements() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn server_reads_every_type() {
-    let Some(mut peer) = Peer::start().await else {
+    let Some(mut peer) = server_peer().await else {
         return;
     };
     let client = peer.client("interop-types");
@@ -239,7 +169,7 @@ async fn server_reads_every_type() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn republishes_after_server_restart() {
-    let Some(mut peer) = Peer::start().await else {
+    let Some(mut peer) = server_peer().await else {
         return;
     };
     let client = peer.client("interop-reconnect");
