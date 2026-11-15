@@ -21,7 +21,9 @@ Written by Claude.
 
 import argparse
 import json
+import os
 import struct
+import sys
 import threading
 import time
 
@@ -36,10 +38,10 @@ args = ap.parse_args()
 
 t0 = time.monotonic()
 inst = ntcore.NetworkTableInstance.create()
-inst.setServer("127.0.0.1", args.port)
-inst.startClient4(f"ntcore-{args.mode}")
+inst.set_server("127.0.0.1", args.port)
+inst.start_client(f"ntcore-{args.mode}")
 sub = ntcore.MultiSubscriber(
-    inst, ["/robot/"], ntcore.PubSubOptions(sendAll=True, periodic=0.005)
+    inst, ["/robot/"], ntcore.PubSubOptions(send_all=True, periodic=0.005)
 )
 
 lock = threading.Lock()
@@ -65,7 +67,7 @@ def seq_of(v):
 
 
 def on_value(topic, value):
-    name = topic.getName()
+    name = topic.get_name()
     v = value.value()
     values[name] = v
     if snapshot_at[0] is None and len(values) >= args.topics:
@@ -84,30 +86,31 @@ def on_value(topic, value):
         elif seq <= prev:
             stats["out_of_order"] += 1
     last_seq[name] = max(seq, prev or seq)
-    offset = inst.getServerTimeOffset()
+    offset = inst.get_server_time_offset()
     if offset is not None:
-        latencies.append(ntcore._now() + offset - value.server_time())
+        # pyntcore 2027 times are nanoseconds.
+        latencies.append((ntcore._now() + offset - value.server_time()) / 1000)
 
 
-mask = ntcore.EventFlags.kValueAll
+mask = ntcore.EventFlags.VALUE_ALL
 if args.mode == "listener":
 
     def cb(event):
         with lock:
             on_value(event.data.topic, event.data.value)
 
-    inst.addListener(sub, mask, cb)
+    inst.add_listener(sub, mask, cb)
 elif args.mode == "poller":
     poller = ntcore.NetworkTableListenerPoller(inst)
-    poller.addListener(sub, mask)
+    poller.add_listener(sub, mask)
 
 
 def read_cache():
     """Native mode: copy ntcore's cached values into `values`."""
-    for topic in inst.getTopics("/robot/"):
-        v = inst.getEntry(topic.getName()).getValue()
-        if v.isValid():
-            values[topic.getName()] = v.value()
+    for topic in inst.get_topics("/robot/"):
+        v = inst.get_entry(topic.get_name()).get_value()
+        if v.is_valid():
+            values[topic.get_name()] = v.value()
     if snapshot_at[0] is None and len(values) >= args.topics:
         snapshot_at[0] = time.monotonic()
 
@@ -115,7 +118,7 @@ def read_cache():
 stop_at = None
 while True:
     now = time.monotonic()
-    if synced_at[0] is None and inst.getServerTimeOffset() is not None:
+    if synced_at[0] is None and inst.get_server_time_offset() is not None:
         synced_at[0] = now
     if stop_at is None and snapshot_at[0] is not None:
         # Measure for --seconds after the snapshot arrived.
@@ -135,7 +138,7 @@ while True:
         else:
             time.sleep(0.05)
     elif args.mode == "poller":
-        for e in poller.readQueue():
+        for e in poller.read_queue():
             if e.data is not None and hasattr(e.data, "value"):
                 on_value(e.data.topic, e.data.value)
         time.sleep(0.005)
@@ -185,3 +188,8 @@ print(
     ),
     flush=True,
 )
+
+# pyntcore 2027.0.0a8 can hang at interpreter exit while a listener or
+# publisher is alive, so leave without running Python's shutdown.
+sys.stdout.flush()
+os._exit(0)

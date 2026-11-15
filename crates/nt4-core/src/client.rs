@@ -386,6 +386,16 @@ impl Default for ClientCore {
     }
 }
 
+/// The time to give [`OutgoingQueue::send_outgoing`]. The queue (like
+/// ntcore's) starts with "last sent at 0 ms" and sends at most every
+/// `MIN_PERIOD_MS`, so on a clock that starts at 0 it would hold everything
+/// back for the first few milliseconds, and the messages waiting for the
+/// first RTT reply would miss it and wait for the next tick. ntcore's clock
+/// never reads that low; shift ours so it doesn't either.
+fn queue_ms(now_us: i64) -> u64 {
+    to_ms(now_us) + u64::from(outgoing::MIN_PERIOD_MS)
+}
+
 fn to_ms(us: i64) -> u64 {
     u64::try_from(us / 1000).unwrap_or(0)
 }
@@ -810,7 +820,7 @@ impl ClientCore {
                 // we send it now.
                 conn.outgoing.set_time_offset(update.server_time_offset_us);
                 conn.outgoing
-                    .send_outgoing(&mut self.wire, to_ms(now_us), false);
+                    .send_outgoing(&mut self.wire, queue_ms(now_us), true);
                 self.wire.finish();
                 self.events.push_back(Event::TimeSync(update));
             }
@@ -904,7 +914,8 @@ impl ClientCore {
         if conn.time_sync.offset().is_none() {
             return;
         }
-        conn.outgoing.send_outgoing(&mut self.wire, now_ms, flush);
+        conn.outgoing
+            .send_outgoing(&mut self.wire, queue_ms(now_us), flush);
         self.wire.finish();
     }
 

@@ -4,18 +4,21 @@
 // in the canonical form nt4-fuzz builds for nt4-proto's output:
 //
 //   binary: {"msgs": [{"id": "1", "time": "5", "value": V}, ...],
-//            "error": null or ntcore's error text}
-//   text:   {"calls": [handler calls in order], "warnings": [log lines]}
+//            "error": null or ntcore's error text as hex}
+//   text:   {"calls": [handler calls in order], "warnings": [log lines, hex]}
 //
-// Either gets "exception": what() if ntcore threw.
+// Either gets "exception": what() as hex if ntcore threw.
 //
 // V is {"t": type, "v": ...}. Numbers are decimal strings, doubles and floats
-// their bit patterns in hex, strings and raw bytes hex, so nothing is lost in
-// JSON. Strings in text frames (names, type strings) are hex for the same
-// reason. Built by build.rs when NT4_NTCORE_PYTHON is set.
+// their bit patterns in hex, and every string is hex, so nothing is lost in
+// JSON and nothing here needs escaping. Properties are JSON values in the
+// form Canon() below writes. Times are microseconds, as on the wire (ntcore
+// holds them in nanoseconds). Built by build.rs when NT4_NTCORE_PYTHON is
+// set.
 //
 // Written by Claude.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -23,26 +26,31 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
-#include <networktables/NetworkTableValue.h>
-#include <wpi/Logger.h>
-#include <wpi/json.h>
+#include <wpi/nt/NetworkTableValue.hpp>
+#include <wpi/util/Logger.hpp>
+#include <wpi/util/json.hpp>
 
-#include "PubSubOptions.h"
-#include "net/MessageHandler.h"
-#include "net/WireDecoder.h"
+#include "PubSubOptions.hpp"
+#include "net/MessageHandler.hpp"
+#include "net/WireDecoder.hpp"
 
 namespace {
+
+using wpi::util::json;
 
 std::string Hex(std::string_view s) {
   static const char* digits = "0123456789abcdef";
   std::string out;
-  out.reserve(s.size() * 2);
+  out.reserve(s.size() * 2 + 2);
+  out.push_back('"');
   for (unsigned char c : s) {
     out.push_back(digits[c >> 4]);
     out.push_back(digits[c & 15]);
   }
+  out.push_back('"');
   return out;
 }
 
@@ -51,171 +59,232 @@ std::string Hex(std::span<const uint8_t> b) {
 }
 
 std::string Bits(double d) {
-  uint64_t u;
-  std::memcpy(&u, &d, 8);
-  return Hex(std::string_view{reinterpret_cast<const char*>(&u), 8});
+  return Hex(std::string_view{reinterpret_cast<const char*>(&d), 8});
 }
 
 std::string Bits(float f) {
-  uint32_t u;
-  std::memcpy(&u, &f, 4);
-  return Hex(std::string_view{reinterpret_cast<const char*>(&u), 4});
+  return Hex(std::string_view{reinterpret_cast<const char*>(&f), 4});
+}
+
+std::string Dec(long long v) {
+  return '"' + std::to_string(v) + '"';
+}
+
+const char* Bool(bool b) {
+  return b ? "true" : "false";
 }
 
 template <typename T, typename F>
-wpi::json List(std::span<const T> items, F f) {
-  wpi::json out = wpi::json::array();
+std::string List(std::span<const T> items, F f) {
+  std::string out = "[";
+  bool first = true;
   for (const auto& i : items) {
-    out.push_back(f(i));
+    if (!first) {
+      out.push_back(',');
+    }
+    first = false;
+    out += f(i);
   }
+  out.push_back(']');
   return out;
 }
 
-wpi::json ValueJson(const nt::Value& v) {
-  wpi::json out;
+// A JSON value (properties) with nothing left to the printer: integers as
+// {"i": decimal}, other numbers as {"f": double bits}, strings as
+// {"s": hex}, objects as {"o": [[hex key, value], ...]} sorted by key.
+// Iterative on arrays would be nicer, but ntcore's parser stops at 20
+// levels, so recursion is shallow.
+std::string Canon(const json& j) {
+  switch (j.type()) {
+    case json::Type::Null:
+      return "null";
+    case json::Type::Bool:
+      return Bool(j.get_bool());
+    case json::Type::Int:
+      return "{\"i\":" + Dec(j.get_int()) + "}";
+    case json::Type::Uint:
+      return "{\"u\":\"" + std::to_string(j.get_uint()) + "\"}";
+    case json::Type::Float:
+    case json::Type::Double:
+      return "{\"f\":" + Bits(j.get_number()) + "}";
+    case json::Type::String:
+      return "{\"s\":" + Hex(j.get_string()) + "}";
+    case json::Type::Array:
+      return List(std::span<const json>{j.get_array()},
+                  [](const json& v) { return Canon(v); });
+    case json::Type::Object: {
+      std::vector<std::pair<std::string, std::string>> items;
+      for (auto&& kv : j.get_object()) {
+        items.emplace_back(std::string{kv.first}, Canon(kv.second));
+      }
+      std::sort(items.begin(), items.end());
+      std::string out = "{\"o\":[";
+      bool first = true;
+      for (auto& [k, v] : items) {
+        if (!first) {
+          out.push_back(',');
+        }
+        first = false;
+        out += "[" + Hex(k) + "," + v + "]";
+      }
+      return out + "]}";
+    }
+  }
+  return "null";
+}
+
+std::string ValueJson(const wpi::nt::Value& v) {
+  auto tv = [](const char* t, const std::string& val) {
+    return std::string{"{\"t\":\""} + t + "\",\"v\":" + val + "}";
+  };
+  auto quoted = [](const char* s) { return std::string{"\""} + s + "\""; };
   switch (v.type()) {
     case NT_BOOLEAN:
-      out = {{"t", "boolean"}, {"v", v.GetBoolean() ? "true" : "false"}};
-      break;
+      return tv("boolean", quoted(Bool(v.GetBoolean())));
     case NT_DOUBLE:
-      out = {{"t", "double"}, {"v", Bits(v.GetDouble())}};
-      break;
+      return tv("double", Bits(v.GetDouble()));
     case NT_INTEGER:
-      out = {{"t", "int"}, {"v", std::to_string(v.GetInteger())}};
-      break;
+      return tv("int", Dec(v.GetInteger()));
     case NT_FLOAT:
-      out = {{"t", "float"}, {"v", Bits(v.GetFloat())}};
-      break;
+      return tv("float", Bits(v.GetFloat()));
     case NT_STRING:
-      out = {{"t", "string"}, {"v", Hex(v.GetString())}};
-      break;
+      return tv("string", Hex(v.GetString()));
     case NT_RAW:
-      out = {{"t", "raw"}, {"v", Hex(v.GetRaw())}};
-      break;
+      return tv("raw", Hex(v.GetRaw()));
     case NT_BOOLEAN_ARRAY:
-      out = {{"t", "boolean[]"},
-             {"v", List(v.GetBooleanArray(),
-                        [](int b) { return b ? "true" : "false"; })}};
-      break;
+      return tv("boolean[]", List(v.GetBooleanArray(), [&](int b) {
+                  return quoted(Bool(b != 0));
+                }));
     case NT_DOUBLE_ARRAY:
-      out = {{"t", "double[]"},
-             {"v", List(v.GetDoubleArray(), [](double d) { return Bits(d); })}};
-      break;
+      return tv("double[]",
+                List(v.GetDoubleArray(), [](double d) { return Bits(d); }));
     case NT_INTEGER_ARRAY:
-      out = {{"t", "int[]"},
-             {"v", List(v.GetIntegerArray(),
-                        [](int64_t i) { return std::to_string(i); })}};
-      break;
+      return tv("int[]",
+                List(v.GetIntegerArray(), [](int64_t i) { return Dec(i); }));
     case NT_FLOAT_ARRAY:
-      out = {{"t", "float[]"},
-             {"v", List(v.GetFloatArray(), [](float f) { return Bits(f); })}};
-      break;
+      return tv("float[]",
+                List(v.GetFloatArray(), [](float f) { return Bits(f); }));
     case NT_STRING_ARRAY:
-      out = {{"t", "string[]"},
-             {"v", List(v.GetStringArray(),
-                        [](const std::string& s) { return Hex(s); })}};
-      break;
+      return tv("string[]", List(v.GetStringArray(), [](const std::string& s) {
+                  return Hex(s);
+                }));
     default:
-      out = {{"t", "unassigned"}};
-      break;
+      return "{\"t\":\"unassigned\"}";
   }
-  return out;
 }
 
-char* Finish(const wpi::json& j) {
-  std::string s = j.dump(-1, ' ', false, wpi::json::error_handler_t::replace);
+char* Finish(const std::string& s) {
   char* out = static_cast<char*>(std::malloc(s.size() + 1));
   std::memcpy(out, s.c_str(), s.size() + 1);
   return out;
 }
 
-wpi::json OptionsJson(const nt::PubSubOptionsImpl& o) {
-  return {{"periodic", Bits(o.periodic)},
-          {"all", o.sendAll},
-          {"topicsOnly", o.topicsOnly},
-          {"prefix", o.prefixMatch}};
+std::string Join(const std::vector<std::string>& items) {
+  std::string out = "[";
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i > 0) {
+      out.push_back(',');
+    }
+    out += items[i];
+  }
+  return out + "]";
+}
+
+std::string OptionsJson(const wpi::nt::PubSubOptionsImpl& o) {
+  return "{\"periodic\":" + Bits(o.periodic) + ",\"all\":" + Bool(o.sendAll) +
+         ",\"topicsOnly\":" + Bool(o.topicsOnly) + ",\"prefix\":" +
+         Bool(o.prefixMatch) + "}";
 }
 
 struct Recorder {
-  wpi::json calls = wpi::json::array();
-  wpi::json warnings = wpi::json::array();
-  wpi::Logger logger;
+  std::vector<std::string> calls;
+  std::vector<std::string> warnings;
+  wpi::util::Logger logger;
 
   Recorder() {
     logger.SetLogger([this](unsigned int, const char*, unsigned int,
-                            const char* msg) { warnings.push_back(msg); });
+                            const char* msg) { warnings.push_back(Hex(msg)); });
     logger.set_min_level(0);
+  }
+
+  std::string Result() const {
+    return "{\"calls\":" + Join(calls) + ",\"warnings\":" + Join(warnings);
   }
 };
 
-class ClientHandler : public nt::net::ClientMessageHandler {
+class ClientHandler : public wpi::nt::net::ClientMessageHandler {
  public:
   explicit ClientHandler(Recorder& r) : r{r} {}
   void ClientPublish(int pubuid, std::string_view name,
-                     std::string_view typeStr, const wpi::json& properties,
-                     const nt::PubSubOptionsImpl&) override {
-    r.calls.push_back({{"m", "publish"},
-                       {"pubuid", std::to_string(pubuid)},
-                       {"name", Hex(name)},
-                       {"type", Hex(typeStr)},
-                       {"props", properties}});
+                     std::string_view typeStr, const json& properties,
+                     const wpi::nt::PubSubOptionsImpl&) override {
+    r.calls.push_back("{\"m\":\"publish\",\"pubuid\":" + Dec(pubuid) +
+                      ",\"name\":" + Hex(name) + ",\"type\":" + Hex(typeStr) +
+                      ",\"props\":" + Canon(properties) + "}");
   }
   void ClientUnpublish(int pubuid) override {
-    r.calls.push_back({{"m", "unpublish"}, {"pubuid", std::to_string(pubuid)}});
+    r.calls.push_back("{\"m\":\"unpublish\",\"pubuid\":" + Dec(pubuid) + "}");
   }
-  void ClientSetProperties(std::string_view name,
-                           const wpi::json& update) override {
-    r.calls.push_back(
-        {{"m", "setproperties"}, {"name", Hex(name)}, {"update", update}});
+  void ClientSetProperties(std::string_view name, const json& update) override {
+    r.calls.push_back("{\"m\":\"setproperties\",\"name\":" + Hex(name) +
+                      ",\"update\":" + Canon(update) + "}");
   }
   void ClientSubscribe(int subuid, std::span<const std::string> topicNames,
-                       const nt::PubSubOptionsImpl& options) override {
+                       const wpi::nt::PubSubOptionsImpl& options) override {
     r.calls.push_back(
-        {{"m", "subscribe"},
-         {"subuid", std::to_string(subuid)},
-         {"topics", List(topicNames, [](const std::string& s) { return Hex(s); })},
-         {"options", OptionsJson(options)}});
+        "{\"m\":\"subscribe\",\"subuid\":" + Dec(subuid) + ",\"topics\":" +
+        List(topicNames, [](const std::string& s) { return Hex(s); }) +
+        ",\"options\":" + OptionsJson(options) + "}");
   }
   void ClientUnsubscribe(int subuid) override {
-    r.calls.push_back({{"m", "unsubscribe"}, {"subuid", std::to_string(subuid)}});
+    r.calls.push_back("{\"m\":\"unsubscribe\",\"subuid\":" + Dec(subuid) + "}");
   }
-  void ClientSetValue(int, const nt::Value&) override {}
+  void ClientSetValue(int, const wpi::nt::Value&) override {}
 
  private:
   Recorder& r;
 };
 
-class ServerHandler : public nt::net::ServerMessageHandler {
+class ServerHandler : public wpi::nt::net::ServerMessageHandler {
  public:
   explicit ServerHandler(Recorder& r) : r{r} {}
   int ServerAnnounce(std::string_view name, int id, std::string_view typeStr,
-                     const wpi::json& properties,
+                     const json& properties,
                      std::optional<int> pubuid) override {
-    r.calls.push_back(
-        {{"m", "announce"},
-         {"name", Hex(name)},
-         {"id", std::to_string(id)},
-         {"type", Hex(typeStr)},
-         {"pubuid", pubuid ? wpi::json(std::to_string(*pubuid)) : wpi::json()},
-         {"props", properties}});
+    r.calls.push_back("{\"m\":\"announce\",\"name\":" + Hex(name) +
+                      ",\"id\":" + Dec(id) + ",\"type\":" + Hex(typeStr) +
+                      ",\"pubuid\":" + (pubuid ? Dec(*pubuid) : "null") +
+                      ",\"props\":" + Canon(properties) + "}");
     return 0;
   }
   void ServerUnannounce(std::string_view name, int id) override {
-    r.calls.push_back(
-        {{"m", "unannounce"}, {"name", Hex(name)}, {"id", std::to_string(id)}});
+    r.calls.push_back("{\"m\":\"unannounce\",\"name\":" + Hex(name) +
+                      ",\"id\":" + Dec(id) + "}");
   }
-  void ServerPropertiesUpdate(std::string_view name, const wpi::json& update,
+  void ServerPropertiesUpdate(std::string_view name, const json& update,
                               bool ack) override {
-    r.calls.push_back({{"m", "properties"},
-                       {"name", Hex(name)},
-                       {"update", update},
-                       {"ack", ack}});
+    r.calls.push_back("{\"m\":\"properties\",\"name\":" + Hex(name) +
+                      ",\"update\":" + Canon(update) + ",\"ack\":" + Bool(ack) +
+                      "}");
   }
-  void ServerSetValue(int, const nt::Value&) override {}
+  void ServerSetValue(int, const wpi::nt::Value&) override {}
 
  private:
   Recorder& r;
 };
+
+template <typename Handler>
+char* DecodeText(const char* data, size_t len) {
+  Recorder r;
+  Handler h{r};
+  // An exception here would end an ntcore process; report it instead.
+  try {
+    wpi::nt::net::WireDecodeText({data, len}, h, r.logger);
+  } catch (const std::exception& e) {
+    return Finish(r.Result() + ",\"exception\":" + Hex(e.what()) + "}");
+  }
+  return Finish(r.Result() + "}");
+}
 
 }  // namespace
 
@@ -223,53 +292,37 @@ extern "C" {
 
 char* nt4_oracle_binary(const uint8_t* data, size_t len) {
   std::span<const uint8_t> in{data, len};
-  wpi::json msgs = wpi::json::array();
-  wpi::json error;
+  std::vector<std::string> msgs;
+  std::string error = "null";
   // As ntcore's ClientImpl and ServerImpl read a frame: until it is empty or
   // a message fails.
   while (!in.empty()) {
     int id = 0;
-    nt::Value value;
+    wpi::nt::Value value;
     std::string err;
     try {
-      if (!nt::net::WireDecodeBinary(&in, &id, &value, &err, 0)) {
-        error = err;
+      if (!wpi::nt::net::WireDecodeBinary(&in, &id, &value, &err, 0)) {
+        error = Hex(err);
         break;
       }
     } catch (const std::exception& e) {
-      return Finish({{"msgs", msgs}, {"error", "exception"}, {"exception", e.what()}});
+      return Finish("{\"msgs\":" + Join(msgs) +
+                    ",\"error\":null,\"exception\":" + Hex(e.what()) + "}");
     }
-    msgs.push_back({{"id", std::to_string(id)},
-                    {"time", std::to_string(value.server_time())},
-                    {"value", ValueJson(value)}});
+    // ntcore holds times in nanoseconds: wire microseconds times 1000.
+    msgs.push_back("{\"id\":" + Dec(id) + ",\"time\":" +
+                   Dec(value.server_time() / 1000) + ",\"value\":" +
+                   ValueJson(value) + "}");
   }
-  return Finish({{"msgs", msgs}, {"error", error}});
+  return Finish("{\"msgs\":" + Join(msgs) + ",\"error\":" + error + "}");
 }
 
 char* nt4_oracle_client_text(const char* data, size_t len) {
-  Recorder r;
-  ClientHandler h{r};
-  // ntcore lets some exceptions out (which would end its process); report
-  // them instead.
-  try {
-    nt::net::WireDecodeText({data, len}, h, r.logger);
-  } catch (const std::exception& e) {
-    return Finish({{"calls", r.calls}, {"warnings", r.warnings}, {"exception", e.what()}});
-  }
-  return Finish({{"calls", r.calls}, {"warnings", r.warnings}});
+  return DecodeText<ClientHandler>(data, len);
 }
 
 char* nt4_oracle_server_text(const char* data, size_t len) {
-  Recorder r;
-  ServerHandler h{r};
-  // ntcore lets some exceptions out (which would end its process); report
-  // them instead.
-  try {
-    nt::net::WireDecodeText({data, len}, h, r.logger);
-  } catch (const std::exception& e) {
-    return Finish({{"calls", r.calls}, {"warnings", r.warnings}, {"exception", e.what()}});
-  }
-  return Finish({{"calls", r.calls}, {"warnings", r.warnings}});
+  return DecodeText<ServerHandler>(data, len);
 }
 
 void nt4_oracle_free(char* s) { std::free(s); }

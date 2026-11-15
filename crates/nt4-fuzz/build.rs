@@ -10,6 +10,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+/// The pyntcore version the oracle and its copied headers are for.
+const NTCORE_VERSION: &str = "2027.0.0a8";
+const NTCORE_HEADERS: &str = "ntcore-v2027.0.0-alpha-8";
+
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_ntcore)");
     println!("cargo::rerun-if-env-changed=NT4_NTCORE_PYTHON");
@@ -26,7 +30,7 @@ fn main() {
         .args([
             "-I",
             "-c",
-            "import ntcore, pathlib; print(pathlib.Path(ntcore.__file__).parent.parent / 'native')",
+            "import ntcore, pathlib; print(pathlib.Path(ntcore.__file__).parent.parent / 'native'); print(ntcore.__version__)",
         ])
         .output()
         .expect("run NT4_NTCORE_PYTHON");
@@ -35,14 +39,23 @@ fn main() {
         "NT4_NTCORE_PYTHON can't import ntcore: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let native = PathBuf::from(String::from_utf8(out.stdout).unwrap().trim());
-    let libs = ["ntcore", "wpinet", "wpiutil"];
+    let out = String::from_utf8(out.stdout).unwrap();
+    let mut lines = out.lines();
+    let native = PathBuf::from(lines.next().unwrap().trim());
+    let version = lines.next().unwrap().trim();
+    // The copied internal headers must match the library they declare.
+    assert!(
+        version == NTCORE_VERSION,
+        "the oracle is written for pyntcore {NTCORE_VERSION}, but NT4_NTCORE_PYTHON has {version}"
+    );
+    println!("cargo::rustc-env=NT4_NTCORE_VERSION={version}");
+    let libs = ["ntcore", "wpinet", "wpiutil", "datalog"];
     let mut build = cc::Build::new();
     build
         .cpp(true)
-        .std("c++20")
+        .std("c++23")
         .file("oracle/oracle.cpp")
-        .include("oracle/ntcore-v2026.2.2")
+        .include(format!("oracle/{NTCORE_HEADERS}"))
         .warnings(false);
     for lib in libs {
         build.include(native.join(lib).join("include"));
@@ -59,7 +72,7 @@ fn main() {
     // libntcore finds wpiutil and wpinet through its own runpath, which
     // doesn't hold outside the wheel's layout; load them first instead.
     println!("cargo::rustc-link-arg=-Wl,--no-as-needed");
-    for lib in ["wpiutil", "wpinet", "ntcore"] {
+    for lib in ["wpiutil", "wpinet", "datalog", "ntcore"] {
         println!("cargo::rustc-link-arg=-l{lib}");
     }
     println!(

@@ -19,7 +19,7 @@ Topics (scale 1, 200 total):
 scenario in bench/run.py, compared with nt4-bench --mode robot), and
 --server-only runs an empty server for that.
 
-After each 20 ms cycle it calls flushLocal(), as TimedRobot does, so periodic
+After each 20 ms cycle it calls flush_local(), as TimedRobot does, so periodic
 values reach the network right away. The tight loop doesn't flush, so its
 values wait for ntcore's 100 ms local timer or the next cycle's flush.
 
@@ -36,7 +36,9 @@ Written by Claude.
 
 import argparse
 import json
+import os
 import struct
+import sys
 import threading
 import time
 
@@ -44,7 +46,6 @@ import ntcore
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, default=5810)
-ap.add_argument("--port3", type=int, default=0)
 ap.add_argument("--seconds", type=float, default=60)
 ap.add_argument("--scale", type=int, default=1)
 ap.add_argument(
@@ -62,41 +63,41 @@ ap.add_argument(
 ap.add_argument(
     "--no-flush-local",
     action="store_true",
-    help="don't call flushLocal() after each 20 ms cycle",
+    help="don't call flush_local() after each 20 ms cycle",
 )
 args = ap.parse_args()
 
 inst = ntcore.NetworkTableInstance.create()
 if args.connect:
-    inst.setServer("127.0.0.1", args.connect)
-    inst.startClient4("robot-sim")
-    while not inst.isConnected():
+    inst.set_server("127.0.0.1", args.connect)
+    inst.start_client("robot-sim")
+    while not inst.is_connected():
         time.sleep(0.01)
 else:
-    inst.startServer("", "127.0.0.1", args.port3 or args.port + 1, args.port)
+    inst.start_server("", "127.0.0.1", "", args.port)
 if args.server_only:
     print(json.dumps({"ready": True, "topics": 0}), flush=True)
     time.sleep(args.seconds)
-    raise SystemExit
+    os._exit(0)
 
 # As a client, send every 20 ms (the default is 100 ms); a server sends at
 # each subscriber's period whatever this says.
-ALL = ntcore.PubSubOptions(sendAll=True, keepDuplicates=True, periodic=0.02)
+ALL = ntcore.PubSubOptions(send_all=True, keep_duplicates=True, periodic=0.02)
 
 # One-time values. Keep the publishers: a dropped publisher unpublishes its
 # topic, and the value goes with it.
 config = []
 for i in range(20):
-    config.append(inst.getStringTopic(f"/robot/config/str{i}").publish())
+    config.append(inst.get_string_topic(f"/robot/config/str{i}").publish())
     config[-1].set(f"value-{i}")
 for i in range(10):
-    config.append(inst.getDoubleTopic(f"/robot/config/num{i}").publish())
+    config.append(inst.get_double_topic(f"/robot/config/num{i}").publish())
     config[-1].set(i * 1.5)
 for i in range(5):
-    config.append(inst.getBooleanTopic(f"/robot/config/flag{i}").publish())
+    config.append(inst.get_boolean_topic(f"/robot/config/flag{i}").publish())
     config[-1].set(i % 2 == 0)
 for i in range(5):
-    config.append(inst.getDoubleArrayTopic(f"/robot/config/arr{i}").publish())
+    config.append(inst.get_double_array_topic(f"/robot/config/arr{i}").publish())
     config[-1].set([float(j) for j in range(10)])
 config_count = len(config)
 
@@ -104,29 +105,29 @@ s = args.scale
 periodic = []  # (kind, publisher)
 for i in range(100 * s):
     periodic.append(
-        ("double", inst.getDoubleTopic(f"/robot/periodic/double{i}").publish(ALL))
+        ("double", inst.get_double_topic(f"/robot/periodic/double{i}").publish(ALL))
     )
 for i in range(20 * s):
     periodic.append(
-        ("int", inst.getIntegerTopic(f"/robot/periodic/int{i}").publish(ALL))
+        ("int", inst.get_integer_topic(f"/robot/periodic/int{i}").publish(ALL))
     )
 for i in range(10 * s):
     periodic.append(
-        ("bool", inst.getBooleanTopic(f"/robot/periodic/bool{i}").publish(ALL))
+        ("bool", inst.get_boolean_topic(f"/robot/periodic/bool{i}").publish(ALL))
     )
 for i in range(10 * s):
     periodic.append(
-        ("darr", inst.getDoubleArrayTopic(f"/robot/periodic/darr{i}").publish(ALL))
+        ("darr", inst.get_double_array_topic(f"/robot/periodic/darr{i}").publish(ALL))
     )
 for i in range(10 * s):
-    t = inst.getRawTopic(f"/robot/periodic/pose{i}")
+    t = inst.get_raw_topic(f"/robot/periodic/pose{i}")
     periodic.append(("raw", t.publish("struct:Pose3d", ALL)))
 
 loop = []
 for i in range(5 * s):
-    loop.append(("int", inst.getIntegerTopic(f"/robot/loop/int{i}").publish(ALL)))
+    loop.append(("int", inst.get_integer_topic(f"/robot/loop/int{i}").publish(ALL)))
 for i in range(5 * s):
-    loop.append(("double", inst.getDoubleTopic(f"/robot/loop/double{i}").publish(ALL)))
+    loop.append(("double", inst.get_double_topic(f"/robot/loop/double{i}").publish(ALL)))
 
 
 def put(kind, pub, seq):
@@ -175,7 +176,7 @@ while time.monotonic() - start < args.seconds:
     if not args.no_flush_local:
         # TimedRobot does this at the end of every loop, so values go to the
         # network now instead of on ntcore's 100 ms local timer.
-        inst.flushLocal()
+        inst.flush_local()
     next_t += 0.020
     delay = next_t - time.monotonic()
     if delay > 0:
@@ -199,3 +200,8 @@ print(
     ),
     flush=True,
 )
+
+# pyntcore 2027.0.0a8 can hang at interpreter exit while a listener or
+# publisher is alive, so leave without running Python's shutdown.
+sys.stdout.flush()
+os._exit(0)

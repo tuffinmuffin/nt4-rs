@@ -185,7 +185,7 @@ fn self_check(target: Target, input: &[u8], text: &str) -> Option<String> {
     }
 }
 
-/// Where nt4 differs from ntcore on purpose, the reason, given nt4's result
+/// Where nt4 differs from ntcore on purpose, the reason, given both results
 /// on the frame. Each one is listed in crates/nt4-fuzz/README.md.
 pub fn known_deviation(
     target: Target,
@@ -196,62 +196,141 @@ pub fn known_deviation(
     if target == Target::Binary {
         return None;
     }
-    let warned = |needle: &str| {
-        ours["warnings"].as_array().is_some_and(|w| {
-            w.iter()
-                .any(|w| w.as_str().is_some_and(|w| w.contains(needle)))
-        })
-    };
-    let ntcore_warned = |needle: &str| {
-        theirs["warnings"].as_array().is_some_and(|w| {
-            w.iter()
-                .any(|w| w.as_str().is_some_and(|w| w.contains(needle)))
-        })
-    };
-    if warned("subuid out of range") && ntcore_warned("pubuid out of range") {
-        return Some("unsubscribe's range error says subuid (ntcore says pubuid, a typo)");
-    }
-    if warned("recursion limit exceeded") {
-        return Some("JSON nested deeper than 128 levels is rejected");
-    }
-    if warned("periodic value out of range") {
+    // ntcore's parser bug; nt4 reads the null as null.
+    if null_after_duplicate_key(text) {
         return Some(
-            "a negative, huge or infinite periodic is rejected (ntcore converts it to unsigned ms, undefined behavior)",
+            "a null right after a repeated object key stays null (ntcore's parser gives it the repeated key's value, a bug)",
         );
     }
-    if has_integer_above_i64(text) && (warned("out of range") || warned("must be a number")) {
-        return Some("integers above i64::MAX are out of range (ntcore wraps them)");
+    let warnings = |j: &Json| -> Vec<String> {
+        j["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Json::as_str)
+            .map(str::to_owned)
+            .collect()
+    };
+    let (mine, ntcore) = (warnings(ours), warnings(theirs));
+
+    // nt4 parses strict JSON; ntcore's parser takes some input that isn't.
+    // Then nt4 drops the whole frame and ntcore doesn't.
+    if let [only] = mine.as_slice()
+        && let Some(why) = only.strip_prefix("could not decode JSON message: ")
+        && !ntcore.iter().any(|w| w.starts_with("could not decode"))
+    {
+        return STRICT_JSON
+            .iter()
+            .find(|(needle, _)| why.contains(needle))
+            .map(|(_, label)| *label);
+    }
+
+    // The same frame with ntcore's typo put into nt4's warnings.
+    let mut patched = ours.clone();
+    let mut typo = false;
+    if let Some(list) = patched["warnings"].as_array_mut() {
+        for (w, theirs) in list.iter_mut().zip(&ntcore) {
+            if let Some(mine) = w.as_str()
+                && let Some(index) = mine.strip_suffix(": subuid out of range")
+                && theirs.strip_suffix(": pubuid out of range") == Some(index)
+            {
+                *w = Json::String(theirs.clone());
+                typo = true;
+            }
+        }
+    }
+    if typo && compare(target, &patched, theirs).is_none() {
+        return Some("unsubscribe's range error says subuid (ntcore says pubuid, a typo)");
     }
     None
 }
 
-/// Whether `text` has an integer literal above `i64::MAX`.
-fn has_integer_above_i64(text: &str) -> bool {
-    let b = text.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i].is_ascii_digit()
-            && (i == 0 || !matches!(b[i - 1], b'0'..=b'9' | b'.' | b'e' | b'E' | b'-'))
-        {
-            let start = i;
-            while i < b.len() && b[i].is_ascii_digit() {
-                i += 1;
-            }
-            let integer = !matches!(b.get(i), Some(b'.' | b'e' | b'E'));
-            if integer
-                && i - start >= 19
-                && text[start..i]
-                    .parse::<u128>()
-                    .map_or(true, |v| v > i64::MAX as u128)
-            {
-                return true;
-            }
-        } else {
-            i += 1;
+/// Whether some JSON object in `text` has a `null` member right after a
+/// member that repeats an earlier key.
+///
+/// ntcore 2027's JSON parser (wpiutil `json.cpp`) reuses one `value` variable
+/// for every member of an object. Reading `null` doesn't assign it, and a
+/// repeated key's value is dropped without clearing it, so the `null` member
+/// ends up with the dropped value: `{"a":1,"a":2,"b":null}` reads as
+/// `{"a":1,"b":2}`.
+pub fn null_after_duplicate_key(text: &str) -> bool {
+    use serde::de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+    use std::cell::Cell;
+    use std::collections::HashSet;
+
+    /// Visits one value and says whether it was `null`.
+    struct Scan<'a>(&'a Cell<bool>);
+
+    impl<'de> DeserializeSeed<'de> for Scan<'_> {
+        type Value = bool;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<bool, D::Error> {
+            d.deserialize_any(self)
         }
     }
-    false
+
+    impl<'de> Visitor<'de> for Scan<'_> {
+        type Value = bool;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("any JSON value")
+        }
+        fn visit_bool<E>(self, _: bool) -> Result<bool, E> {
+            Ok(false)
+        }
+        fn visit_i64<E>(self, _: i64) -> Result<bool, E> {
+            Ok(false)
+        }
+        fn visit_u64<E>(self, _: u64) -> Result<bool, E> {
+            Ok(false)
+        }
+        fn visit_f64<E>(self, _: f64) -> Result<bool, E> {
+            Ok(false)
+        }
+        fn visit_str<E>(self, _: &str) -> Result<bool, E> {
+            Ok(false)
+        }
+        fn visit_unit<E>(self) -> Result<bool, E> {
+            Ok(true)
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<bool, A::Error> {
+            while seq.next_element_seed(Scan(self.0))?.is_some() {}
+            Ok(false)
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<bool, A::Error> {
+            let mut seen = HashSet::new();
+            let mut after_duplicate = false;
+            while let Some(key) = map.next_key::<String>()? {
+                let is_null = map.next_value_seed(Scan(self.0))?;
+                if after_duplicate && is_null {
+                    self.0.set(true);
+                }
+                after_duplicate = !seen.insert(key);
+            }
+            Ok(false)
+        }
+    }
+
+    let found = Cell::new(false);
+    let mut de = serde_json::Deserializer::from_str(text);
+    let _ = Scan(&found).deserialize(&mut de);
+    found.get()
 }
+
+/// serde_json errors for input ntcore's parser accepts, and what to call
+/// each in the report.
+const STRICT_JSON: &[(&str, &str)] = &[
+    (
+        "hex escape",
+        "strict JSON: a \\u escape that is half of a surrogate pair is rejected (ntcore accepts it)",
+    ),
+    (
+        "number out of range",
+        "strict JSON: a number too large for a double is rejected (ntcore reads it as infinity)",
+    ),
+    (
+        "invalid escape",
+        "strict JSON: an escape that JSON doesn't have, such as \\x41, is rejected (ntcore accepts it)",
+    ),
+];
 
 /// Where the two results differ, or `None` if they agree.
 pub fn compare(target: Target, ours: &Json, theirs: &Json) -> Option<String> {
@@ -297,8 +376,8 @@ pub fn compare(target: Target, ours: &Json, theirs: &Json) -> Option<String> {
                 });
             }
             // Only the start of a JSON syntax error is compared: the rest is
-            // the JSON library's own words (serde_json here, nlohmann's in
-            // ntcore 2026, another in ntcore 2027).
+            // the JSON library's own words (serde_json here, wpiutil's parser
+            // in ntcore).
             let syntax = |w: &Json| -> Vec<String> {
                 w.as_array()
                     .into_iter()
@@ -390,6 +469,41 @@ fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// Properties in the oracle's form (`Canon` in oracle.cpp), which leaves
+/// nothing to a JSON printer: integers as `{"i": decimal}`, other numbers
+/// as `{"f": double bits}`, strings as `{"s": hex}`, and objects as
+/// `{"o": [[hex key, value], ...]}` sorted by key.
+fn canon_props(p: &nt4_proto::Properties) -> Json {
+    fn canon(j: &Json) -> Json {
+        match j {
+            Json::Null | Json::Bool(_) => j.clone(),
+            Json::Number(n) => match (n.as_i64(), n.as_u64()) {
+                (Some(i), _) => json!({"i": i.to_string()}),
+                (None, Some(u)) => json!({"u": u.to_string()}),
+                _ => json!({"f": hex(&n.as_f64().unwrap_or(f64::NAN).to_le_bytes())}),
+            },
+            Json::String(s) => json!({"s": hex(s.as_bytes())}),
+            Json::Array(a) => Json::Array(a.iter().map(canon).collect()),
+            Json::Object(o) => {
+                let mut items: Vec<(&String, &Json)> = o.iter().collect();
+                items.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+                let items: Vec<Json> = items
+                    .into_iter()
+                    .map(|(k, v)| json!([hex(k.as_bytes()), canon(v)]))
+                    .collect();
+                json!({"o": items})
+            }
+        }
+    }
+    let mut items: Vec<(&String, &Json)> = p.iter().collect();
+    items.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    let items: Vec<Json> = items
+        .into_iter()
+        .map(|(k, v)| json!([hex(k.as_bytes()), canon(v)]))
+        .collect();
+    json!({"o": items})
+}
+
 fn value_json(v: &Value) -> Json {
     let bits64 = |d: f64| hex(&d.to_le_bytes());
     let bits32 = |f: f32| hex(&f.to_le_bytes());
@@ -450,13 +564,13 @@ pub fn canon_client_text(text: &str) -> Json {
                 properties,
             } => json!({
                 "m": "publish", "pubuid": pubuid.to_string(), "name": hex(name.as_bytes()),
-                "type": hex(ty.to_string().as_bytes()), "props": properties,
+                "type": hex(ty.to_string().as_bytes()), "props": canon_props(properties),
             }),
             ClientMessage::Unpublish { pubuid } => {
                 json!({"m": "unpublish", "pubuid": pubuid.to_string()})
             }
             ClientMessage::SetProperties { name, update } => {
-                json!({"m": "setproperties", "name": hex(name.as_bytes()), "update": update})
+                json!({"m": "setproperties", "name": hex(name.as_bytes()), "update": canon_props(update)})
             }
             ClientMessage::Subscribe {
                 subuid,
@@ -498,13 +612,13 @@ pub fn canon_server_text(text: &str) -> Json {
             } => json!({
                 "m": "announce", "name": hex(name.as_bytes()), "id": id.to_string(),
                 "type": hex(ty.to_string().as_bytes()),
-                "pubuid": pubuid.map(|p| p.to_string()), "props": properties,
+                "pubuid": pubuid.map(|p| p.to_string()), "props": canon_props(properties),
             }),
             ServerMessage::Unannounce { name, id } => {
                 json!({"m": "unannounce", "name": hex(name.as_bytes()), "id": id.to_string()})
             }
             ServerMessage::Properties { name, update, ack } => json!({
-                "m": "properties", "name": hex(name.as_bytes()), "update": update, "ack": ack,
+                "m": "properties", "name": hex(name.as_bytes()), "update": canon_props(update), "ack": ack,
             }),
         })
         .collect();
@@ -608,12 +722,30 @@ mod oracle {
         unsafe { nt4_oracle_free(p) };
         let mut de = serde_json::Deserializer::from_str(&s);
         de.disable_recursion_limit();
-        let j = de
+        let mut j = de
             .into_iter::<Json>()
             .next()
             .expect("oracle writes JSON")
             .expect("oracle writes JSON");
+        // The oracle writes ntcore's own text (warnings, errors) as hex.
+        for key in ["error", "exception"] {
+            if let Some(h) = j.get(key).and_then(Json::as_str) {
+                j[key] = Json::String(unhex(h));
+            }
+        }
+        if let Some(warnings) = j.get_mut("warnings").and_then(Json::as_array_mut) {
+            for w in warnings {
+                *w = Json::String(unhex(w.as_str().unwrap_or_default()));
+            }
+        }
         super::normalize(j)
+    }
+
+    fn unhex(h: &str) -> String {
+        let bytes: Vec<u8> = (0..h.len() / 2)
+            .map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap_or(0))
+            .collect();
+        String::from_utf8_lossy(&bytes).into_owned()
     }
 
     pub fn binary(b: &[u8]) -> Json {

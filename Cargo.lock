@@ -364,6 +364,7 @@ dependencies = [
  "cc",
  "nt4-core",
  "nt4-proto",
+ "serde",
  "serde_json",
 ]
 
@@ -384,6 +385,7 @@ dependencies = [
  "hex",
  "rmp",
  "rmpv",
+ "serde",
  "serde_json",
  "thiserror",
 ]

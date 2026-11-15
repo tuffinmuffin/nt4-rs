@@ -69,10 +69,9 @@ fn run() {
 
     println!(
         "seed {seed}, {seconds} s, oracle: {}",
-        if has_oracle() {
-            "ntcore (pyntcore 2026.2.2)"
-        } else {
-            "none (self-checks only)"
+        match option_env!("NT4_NTCORE_VERSION") {
+            Some(v) if has_oracle() => format!("ntcore (pyntcore {v})"),
+            _ => "none (self-checks only)".into(),
         }
     );
     // A panic in nt4 is reported as a finding, not printed (set

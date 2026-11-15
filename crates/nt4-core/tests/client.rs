@@ -503,12 +503,29 @@ fn v4_0_uses_rtt_pings_for_keepalive() {
     );
 }
 
+/// What was queued before the first RTT reply goes out with that reply, even
+/// when the reply comes within a few milliseconds of the clock's zero (a
+/// local server, a client that just started). Written by Claude.
+#[test]
+fn queued_messages_go_out_at_first_sync() {
+    let mut client = ClientCore::new();
+    double_pub(&mut client, "/a");
+    client.connect(0, ProtocolVersion::V4_1);
+    assert!(matches!(client.poll_transmit(), Some(Transmit::Binary(_))));
+    assert_eq!(drain_transmit(&mut client), vec![]);
+    client.handle_binary(1_000, &rtt_reply(0, OFFSET));
+    assert_eq!(
+        drain_transmit(&mut client),
+        vec![Out::Text(vec![publish_msg("/a", 1)])]
+    );
+}
+
 #[test]
 fn blocked_wire_holds_messages() {
     let mut client = ClientCore::new();
-    double_pub(&mut client, "/a");
     connect_synced(&mut client, 0, ProtocolVersion::V4_1);
     client.set_writable(false);
+    double_pub(&mut client, "/a");
     client.send_outgoing(10_000, true);
     assert_eq!(drain_transmit(&mut client), vec![Out::Ping]);
     client.set_writable(true);

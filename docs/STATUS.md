@@ -18,7 +18,7 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 ## What PR #3 found
 
 The load benchmark (`bench/`, results in `bench/README.md`) runs nt4 and
-pyntcore 2026.2.2 against a simulated robot of 200 topics (one-time values,
+pyntcore 2027.0.0a8 against a simulated robot of 200 topics (one-time values,
 values set every 20 ms, and a busy loop), scalable to 1,640 topics. No values
 were lost in any run, and with no per-value code nt4 used less CPU and memory
 than C++ ntcore.
@@ -40,7 +40,7 @@ It also found three problems, fixed in PR #3:
 `crates/nt4-fuzz` is a differential fuzzer for our own parser (see
 `crates/nt4-fuzz/README.md`). It generates structure-aware frames (MessagePack
 binary, client and server JSON text), decodes each one with `nt4-proto` and
-with ntcore's own decoders from the pyntcore 2026.2.2 wheel, and compares the
+with ntcore's own decoders from the pyntcore 2027.0.0a8 wheel, and compares the
 results. It also feeds every frame to `ClientCore` to check for panics, and
 shrinks any failing input. Without `NT4_NTCORE_PYTHON` set it runs only nt4's
 own checks.
@@ -50,23 +50,26 @@ Fixed in `nt4-proto` as a result:
 - Invalid UTF-8 in binary string values is now accepted with replacement
   characters, as ntcore does.
 - `-0` integer literals in JSON text frames now parse as 0, as in ntcore.
-- Integer id fields above `i64::MAX` are now rejected as out of range instead
-  of wrapping.
 - JSON numbers now parse exactly (serde_json `float_roundtrip`), as ntcore's
   do; some doubles decoded one step low before.
+- JSON nesting stops at 20 levels, the first of a repeated key wins, and an
+  integer above `i64::MAX` is not a valid id, all as in ntcore 2027.
+- A binary timestamp too large to hold in nanoseconds is rejected, as in
+  ntcore 2027.
 
 `crates/nt4-proto/tests/fuzz_regressions.rs` keeps the inputs behind each fix.
 
-Intentional differences from ntcore (JSON nesting limit, out-of-range
-`periodic`, ids above `i64::MAX`, ntcore's unsubscribe error-text typo) are
-listed in the fuzzer README.
+nt4 tracks ntcore 2027 and later only (ntcore 2026 goes out of support), so
+the oracle, the interop tests and the benchmark all use pyntcore 2027.0.0a8.
+Against it the fuzzer reports no mismatches. The intentional differences are
+listed in the fuzzer README: nt4 rejects a few kinds of text that are not
+JSON but that ntcore's parser takes, and it does not copy two ntcore bugs.
 
-It also found an ntcore bug: ntcore 2026.2.2 ends its process on a JSON text
-frame holding a number too large for a double, such as `[1e400]`. Its JSON
-parser throws `out_of_range`, and `WireDecodeText` only catches
-`parse_error`. ntcore 2027 (alpha 8) uses a different JSON parser and is not
-affected. `nt4-proto` handles these frames. A write-up for WPILib is in
-progress.
+Those two ntcore bugs are on allwpilib `main`: the JSON parser gives a `null`
+member that follows a repeated key the repeated key's value, and
+`unsubscribe` logs "pubuid out of range" for a bad `subuid`. A write-up for
+WPILib is in
+[this doc](https://claude.ai/artifact/QZfgEuNvsBzrsHrimL2qUG).
 
 ### Running it
 
@@ -96,7 +99,7 @@ check is enough.
 ## Next steps
 
 1. **Review and merge PR #3.**
-2. **Report the `1e400` ntcore bug to allwpilib** (2026 branch only).
+2. **Report the two ntcore bugs to allwpilib** (`main`).
 3. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
    once it exists, and add server benchmarks to `nt4-perf`.
 
@@ -109,5 +112,5 @@ cargo test --workspace
 ```
 
 The interop tests and the benchmark need a Python with `pyntcore` installed
-(`pip install pyntcore==2026.2.2`); see `crates/nt4/tests/interop` and
+(`pip install --pre pyntcore==2027.0.0a8`); see `crates/nt4/tests/interop` and
 `bench/README.md`.

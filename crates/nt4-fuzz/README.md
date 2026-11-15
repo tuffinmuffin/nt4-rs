@@ -7,7 +7,8 @@ results. It also feeds every frame to `ClientCore` to check for panics.
 ## Building
 
 Without `NT4_NTCORE_PYTHON` the fuzzer only runs nt4's own checks (no panics,
-round trips). Set it to a Python interpreter with pyntcore 2026.2.2 installed
+round trips). Set it to a Python interpreter with pyntcore 2027.0.0a8 installed
+(`pip install --pre pyntcore==2027.0.0a8`)
 to enable the oracle:
 
 ```bash
@@ -15,7 +16,9 @@ NT4_NTCORE_PYTHON=<python with pyntcore> cargo build --release -p nt4-fuzz
 ```
 
 The oracle builds on Linux only. It links ntcore's own shared libraries
-directly out of the pyntcore wheel. Build.rs finds them by running Python to locate `site-packages/native`.
+directly out of the pyntcore wheel. Build.rs finds them by running Python to locate `site-packages/native`,
+and stops if the wheel is another version. The shim needs a C++23 compiler
+(ntcore 2027's headers use `std::expected`).
 
 ## Running
 
@@ -56,32 +59,42 @@ is lost through JSON.
 
 ## Known deviations
 
-Cases where nt4 intentionally differs from ntcore:
+Cases where nt4 intentionally differs from ntcore 2027. The fuzzer counts
+these separately and does not report them as mismatches.
 
 | Case | nt4 behavior | ntcore behavior | Why |
 | --- | --- | --- | --- |
-| JSON nested > 128 levels | rejects | accepts | Stack overflow risk; serde_json's default limit |
-| `periodic` out of range (negative, huge, ∞) | rejects with warning | ntcore 2026 accepts it and converts to unsigned ms (undefined behavior) | ntcore 2027 rejects these too (allwpilib #9301) |
-| Integers above `i64::MAX` | rejects as "out of range" | ntcore 2026 reads them as negative (`18446744073709551615` becomes id -1) | A wrapped id is never what the sender meant |
+| Text that isn't JSON but ntcore's parser takes: a `\u` escape that is half of a surrogate pair, a number too large for a double (`1e400`), a `\x41` escape | rejects the frame | accepts it (the number becomes infinity) | nt4 parses strict JSON; no real peer sends these |
+| A `null` member right after a repeated key, `{"a":1,"a":2,"b":null}` | `b` is null | `b` is 2 | ntcore parser bug, see below |
 | `unsubscribe` bad uid error text | "subuid out of range" | "pubuid out of range" | ntcore has a typo |
 
-## ntcore bug found
+Everything else matches, including the things that are particular to ntcore
+2027: JSON nesting stops at 20 levels, the first of a repeated key wins, `-0`
+is the integer 0, an integer above `i64::MAX` is not a valid id, an
+out-of-range `periodic` is rejected, and a binary timestamp too large to hold
+in nanoseconds is rejected.
 
-ntcore 2026.2.2 ends its process on a text frame holding a number too large
-for a double, such as `[1e400]`. Its JSON parser throws `out_of_range`, and
-`WireDecodeText` only catches `parse_error`. This happens in a server and in a
-client. ntcore 2027 (alpha 8) uses a different JSON parser and is not
-affected. nt4-proto handles these frames.
+## ntcore bugs found
 
-The oracle catches the exception and reports it, so the fuzzer keeps running
-and lists these frames under "ntcore threw".
+Both are in ntcore 2027 (alpha 8) and on allwpilib `main`.
+
+- The JSON parser (wpiutil `json.cpp`) reuses one `value` variable for every
+  member of an object. Reading `null` doesn't assign it, and a repeated key's
+  value is dropped without clearing it, so a `null` member right after a
+  repeated key gets the dropped value: `{"a":1,"a":2,"b":null}` reads as
+  `{"a":1,"b":2}`.
+- `unsubscribe` with a `subuid` out of range logs "pubuid out of range".
+
+ntcore 2026.2.2 had more (a process exit on `[1e400]`, ids above `i64::MAX`
+wrapping to negative ids, an unchecked `periodic`). ntcore 2027 has none of
+those, and nt4 only tracks 2027 and later.
 
 ## Structure
 
 ```
 oracle/
   oracle.cpp               # C shim over ntcore's WireDecodeBinary/WireDecodeText
-  ntcore-v2026.2.2/        # ntcore internal headers from allwpilib v2026.2.2
+  ntcore-v2027.0.0-alpha-8/  # ntcore internal headers from that allwpilib tag
 src/
   lib.rs                   # check(), shrink(), generate(), known_deviation(), …
   generator.rs             # structure-aware frame generator (Rng, generate)

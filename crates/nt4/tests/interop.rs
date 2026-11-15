@@ -6,7 +6,7 @@
 //! `cargo test` works without Python; CI sets it.
 //!
 //! ```text
-//! python -m venv .venv && .venv/bin/pip install pyntcore==2026.2.2
+//! python -m venv .venv && .venv/bin/pip install --pre pyntcore==2027.0.0a8
 //! NT4_INTEROP_PYTHON=.venv/bin/python cargo test -p nt4 --test interop
 //! ```
 
@@ -63,10 +63,8 @@ impl Peer {
     }
 
     async fn start_server(&mut self) {
-        let port3 = free_port();
-        let port4 = self.port4;
-        self.cmd(json!({"cmd": "start_server", "port4": port4, "port3": port3}))
-            .await;
+        let port = self.port4;
+        self.cmd(json!({"cmd": "start_server", "port": port})).await;
     }
 
     async fn stop_server(&mut self) {

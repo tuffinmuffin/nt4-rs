@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 nt4-proto = { path = "../nt4-proto" }
 nt4-core = { path = "../nt4-core" }
+serde.workspace = true
 # unbounded_depth: the oracle's output nests as deep as the input did.
 serde_json = { workspace = true, features = ["unbounded_depth"] }
 
