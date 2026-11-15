@@ -13,6 +13,8 @@
 //! | `String` | `string` |
 //! | `Vec<u8>` | `raw` |
 //! | `Vec<bool>`, `Vec<f64>`, `Vec<i64>`, `Vec<f32>`, `Vec<String>` | the `[]` array types |
+//! | `T` and `Vec<T>` for `T:` [`NtStruct`](crate::structs::NtStruct) | `struct:<name>` and `struct:<name>[]` |
+//! | [`Proto<T>`](crate::structs::Proto) | `proto:<message name>` |
 //!
 //! ```
 //! use nt4::NtValue;
@@ -33,6 +35,13 @@ pub trait NtValue: Sized + Clone + Send + Sync + 'static {
     fn into_value(self) -> Value;
     /// Convert from a wire value; `None` if the value has another type.
     fn from_value(value: &Value) -> Option<Self>;
+
+    /// The schemas a topic of this type needs, as (name, schema type,
+    /// data); publishing puts each on `/.schema/<name>` once. None for the
+    /// plain types; structs and protobuf messages have theirs.
+    fn for_each_schema(f: &mut dyn FnMut(&str, &str, &[u8])) {
+        let _ = f;
+    }
 }
 
 macro_rules! nt_value {

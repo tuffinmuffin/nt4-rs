@@ -3,3 +3,10 @@ WireEncoderTextTest ServerMessageEmpty   # Rust enums can't be empty
 WireEncoderTextTest ServerMessageValue   # values are binary frames, not a text message variant
 TimeSyncTest TestServer                  # an instance switching to server mode (offset 0); nt4's Server is its own type and always runs on server time (Server::now_us)
 ServerImplTest AddClient3                # NT3 clients; nt4 speaks NT4 only (the upstream case is empty)
+StructTest InnerNonconstexpr               # C++ constexpr vs runtime type names; an NtStruct's name and schema are consts, covered by InnerConstexpr
+StructTest OuterNonconstexpr               # as InnerNonconstexpr; covered by OuterConstexpr
+StructTest InnerArrayNonconstexpr          # as InnerNonconstexpr; covered by InnerArrayConstexpr
+StructTest StructFixedArrayA               # std::array<T, N> as one struct: wpiutil appends [N] to T's whole schema, which only arrays its last field; nt4 has no fixed-array struct type (use Vec<T>, struct:T[])
+StructTest StructB                         # structs with a runtime info parameter (Struct<T, I...>); an NtStruct carries its own layout
+StructTest StructArrayB                    # as StructB
+StructTest StructFixedArrayB               # as StructB and StructFixedArrayA

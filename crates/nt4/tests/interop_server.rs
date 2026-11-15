@@ -519,3 +519,41 @@ async fn persistent_file_matches_ntcore_byte_for_byte() {
     assert_eq!(core.dump_persistent(), text.replace("\r\n", "\n"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ntcore_client_reads_server_structs_and_schemas() {
+    use nt4::wpimath::{Rotation2d, SwerveModuleVelocity};
+    let server = server().await;
+    let modules: Vec<_> = (0..4)
+        .map(|i| SwerveModuleVelocity {
+            velocity: i as f64,
+            angle: Rotation2d { value: -(i as f64) },
+        })
+        .collect();
+    let publisher = server.publish::<Vec<SwerveModuleVelocity>>("/drive/modules");
+    publisher.set(modules.clone());
+    let Some(mut peer) = ntcore_client(&server, "dash-structs").await else {
+        return;
+    };
+
+    let got = ntcore_get(&mut peer, "/drive/modules").await;
+    assert_eq!(got["type"], "struct:SwerveModuleVelocity[]");
+    let nt4::Value::Raw(bytes) = nt4::NtValue::into_value(modules) else {
+        unreachable!();
+    };
+    assert_eq!(got["value"], json!(bytes));
+    for (name, schema) in [
+        ("struct:Rotation2d", "double value"),
+        (
+            "struct:SwerveModuleVelocity",
+            "double velocity;Rotation2d angle",
+        ),
+    ] {
+        let topic = format!("/.schema/{name}");
+        let got = ntcore_get(&mut peer, &topic).await;
+        assert_eq!(got["type"], "structschema", "{name}");
+        assert_eq!(got["value"], json!(schema.as_bytes()), "{name}");
+        let props = peer.cmd(json!({"cmd": "properties", "name": topic})).await;
+        assert_eq!(props["properties"], json!({"retained": true}), "{name}");
+    }
+}

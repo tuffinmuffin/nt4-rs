@@ -244,7 +244,7 @@ jobs:
           git init -q allwpilib
           cd allwpilib
           git remote add origin https://github.com/wpilibsuite/allwpilib.git
-          git sparse-checkout set --no-cone /ntcore/src/test/
+          git sparse-checkout set --no-cone /ntcore/src/test/ /wpiutil/src/test/native/cpp/struct/
           git fetch -q --depth 1 --filter=blob:none origin "$ALLWPILIB_COMMIT"
           git checkout -q FETCH_HEAD
       - run: python3 scripts/upstream_audit.py allwpilib

@@ -197,3 +197,97 @@ async fn republishes_after_server_restart() {
         .await;
     assert_eq!(eventually(|| echo.get()).await, 3.0);
 }
+
+/// The bytes of a struct value, as JSON numbers (how the peer reports raw).
+fn bytes_json<T: nt4::NtValue>(value: T) -> serde_json::Value {
+    match value.into_value() {
+        nt4::Value::Raw(bytes) => json!(bytes),
+        other => panic!("not raw: {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn struct_topics_and_schemas_match_ntcore() {
+    use nt4::wpimath::{Pose2d, Rotation2d, Translation2d};
+    let Some(mut peer) = server_peer().await else {
+        return;
+    };
+    // ntcore registers one schema itself, to compare properties with.
+    peer.cmd(json!({"cmd": "add_schema", "name": "struct:Ref", "type": "structschema", "schema": "double x"}))
+        .await;
+    let reference = peer
+        .cmd(json!({"cmd": "properties", "name": "/.schema/struct:Ref"}))
+        .await["properties"]
+        .clone();
+    assert_eq!(reference, json!({"retained": true}));
+
+    let client = peer.client("interop-struct");
+    let pose = Pose2d {
+        translation: Translation2d { x: 1.0, y: -2.0 },
+        rotation: Rotation2d { value: 0.25 },
+    };
+    let publisher = client.publish::<Pose2d>("/vision/pose", PublishOptions::default());
+    publisher.set(pose);
+
+    let got = peer
+        .cmd(json!({"cmd": "get", "name": "/vision/pose"}))
+        .await;
+    assert_eq!(got["type"], "struct:Pose2d");
+    assert_eq!(got["value"], bytes_json(pose));
+    for (name, schema) in [
+        ("struct:Translation2d", "double x;double y"),
+        ("struct:Rotation2d", "double value"),
+        (
+            "struct:Pose2d",
+            "Translation2d translation;Rotation2d rotation",
+        ),
+    ] {
+        let topic = format!("/.schema/{name}");
+        let got = peer.cmd(json!({"cmd": "get", "name": topic})).await;
+        assert_eq!(got["type"], "structschema", "{name}");
+        assert_eq!(got["value"], json!(schema.as_bytes()), "{name}");
+        let props = peer.cmd(json!({"cmd": "properties", "name": topic})).await;
+        assert_eq!(props["properties"], reference, "{name}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reads_ntcore_structs_typed_and_by_schema() {
+    use nt4::proto::structs::{DynamicStruct, StructDatabase};
+    use nt4::wpimath::Translation2d;
+    let Some(mut peer) = server_peer().await else {
+        return;
+    };
+    let value = Translation2d { x: 3.0, y: 4.0 };
+    peer.cmd(json!({"cmd": "add_schema", "name": "struct:Translation2d", "type": "structschema", "schema": "double x;double y"}))
+        .await;
+    peer.cmd(json!({"cmd": "publish", "name": "/t", "type": "struct:Translation2d", "value": bytes_json(value)}))
+        .await;
+
+    let client = peer.client("interop-struct-read");
+    let typed = client.subscribe::<Translation2d>("/t", SubscriptionOptions::default());
+    let schema = client.subscribe::<Vec<u8>>(
+        "/.schema/struct:Translation2d",
+        SubscriptionOptions::default(),
+    );
+    assert_eq!(eventually(|| typed.get()).await, value);
+
+    // A dashboard that doesn't know the type reads it through the schema.
+    let schema = String::from_utf8(eventually(|| schema.get()).await).unwrap();
+    let mut db = StructDatabase::new();
+    db.add("Translation2d", &schema).unwrap();
+    let nt4::Value::Raw(bytes) = client.topic("/t").unwrap().value.unwrap().value else {
+        panic!("not raw");
+    };
+    let t = DynamicStruct::new(&db, "Translation2d", &bytes).unwrap();
+    assert_eq!(t.get_double(t.field("y").unwrap(), 0), Some(4.0));
+    // ntcore's schema topic has the properties our add_schema gives.
+    let props = client
+        .topic("/.schema/struct:Translation2d")
+        .unwrap()
+        .properties;
+    assert_eq!(
+        serde_json::to_value(props).unwrap(),
+        json!({"retained": true})
+    );
+}

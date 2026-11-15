@@ -757,6 +757,53 @@ pub fn drive_server_core(target: Target, input: &[u8]) {
     }
 }
 
+/// Feed the input to the struct schema parser and the dynamic struct
+/// views: as a schema of its own, inside schemas that nest it, and as
+/// value bytes for all of them. Schemas come off the network
+/// (`/.schema/struct:*` topics), so this must never panic.
+pub fn drive_structs(input: &[u8]) {
+    use nt4_proto::structs::{DynamicStruct, DynamicStructMut, FieldValue, StructDatabase};
+    fn walk(v: &FieldValue<'_>) {
+        match v {
+            FieldValue::Struct(s) => s.values().iter().for_each(|(_, v)| walk(v)),
+            FieldValue::Array(items) => items.iter().for_each(walk),
+            _ => {}
+        }
+    }
+    let text = String::from_utf8_lossy(input);
+    let mut db = StructDatabase::new();
+    let _ = db.add("B", "A a; A b[2]; int8 x:3; bool y:1; char s[3]");
+    let _ = db.add("A", &text);
+    for (i, part) in text.split(['|', ';']).take(4).enumerate() {
+        let _ = db.add(["A", "B", "C", "D"][i], part);
+    }
+    let _ = db.add("C", "B b; enum {x=1} uint64 u:63");
+    for name in ["A", "B", "C", "D"] {
+        if let Some(view) = DynamicStruct::new(&db, name, input) {
+            view.values().iter().for_each(|(_, v)| walk(v));
+        }
+        let _ = DynamicStruct::array(&db, name, input);
+        let mut data = input.to_vec();
+        if let Some(mut view) = DynamicStructMut::new(&db, name, &mut data) {
+            let desc = view.descriptor();
+            for field in desc.fields() {
+                for i in 0..field.array_size().min(4) {
+                    let _ = view.set_int(field, -1, i);
+                    let _ = view.set_uint(field, u64::MAX, i);
+                    let _ = view.set_bool(field, true, i);
+                    let _ = view.set_double(field, 1.5, i);
+                    let _ = view.set_float(field, 1.5, i);
+                    if let Some(mut inner) = view.get_struct_mut(field, i) {
+                        inner.data().fill(0xff);
+                    }
+                }
+                let _ = view.set_string(field, &text);
+            }
+            let _ = view.as_ref().values();
+        }
+    }
+}
+
 #[cfg(has_ntcore)]
 #[allow(unsafe_code)]
 mod oracle {

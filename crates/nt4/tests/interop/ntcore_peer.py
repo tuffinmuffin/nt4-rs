@@ -16,6 +16,8 @@ Commands (the peer is an ntcore server or an ntcore client):
   {"cmd": "properties", "name": "/x"}
   {"cmd": "topics", "prefix": "/"}
   {"cmd": "publish", "name": "/x", "type": "double", "value": 1.5}
+      (types without a setter below, e.g. "struct:Pose2d", take bytes)
+  {"cmd": "add_schema", "name": "struct:Point", "type": "structschema", "schema": "double x"}
   {"cmd": "subscribe", "name": "/x"}
   {"cmd": "get", "name": "/x", "timeout": 5, "not": <value to wait past>}
   {"cmd": "connections"}
@@ -109,9 +111,13 @@ def handle(cmd):
         if name not in publishers:
             publishers[name] = inst.get_topic(name).generic_publish(ty)
         value = cmd["value"]
-        if ty == "raw":
+        setter = SETTERS.get(ty, "set_raw")
+        if setter == "set_raw":
             value = bytes(value)
-        getattr(publishers[name], SETTERS[ty])(value)
+        getattr(publishers[name], setter)(value)
+        return {"ok": True}
+    if c == "add_schema":
+        inst.add_schema(cmd["name"], cmd["type"], cmd["schema"])
         return {"ok": True}
     if c == "subscribe":
         subscriber(cmd["name"])

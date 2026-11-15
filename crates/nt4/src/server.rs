@@ -21,7 +21,7 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -122,6 +122,8 @@ struct State {
     watchers: HashMap<String, watch::Sender<Option<TopicValue>>>,
     /// Queues for [`Server::events`] listeners.
     listeners: Vec<mpsc::UnboundedSender<ServerEvent>>,
+    /// Schemas published so far (by name, without `/.schema/`).
+    schemas: HashSet<String>,
 }
 
 struct Shared {
@@ -264,6 +266,7 @@ impl Server {
                 conns: HashMap::new(),
                 watchers: HashMap::new(),
                 listeners: Vec::new(),
+                schemas: HashSet::new(),
             }),
             start,
             load_errors,
@@ -296,7 +299,9 @@ impl Server {
         self.local_addr
     }
 
-    /// Publish a typed topic from the server.
+    /// Publish a typed topic from the server. For a struct or protobuf
+    /// type, its schemas are published first (see
+    /// [`add_schema`](Self::add_schema)).
     ///
     /// ```
     /// # #[tokio::main(flavor = "current_thread")] async fn main() {
@@ -304,10 +309,53 @@ impl Server {
     /// let server = Server::start(ServerConfig::port(0)).await.unwrap();
     /// let mode = server.publish::<String>("/robot/mode");
     /// mode.set("disabled".into()); // clients that subscribe get it
+    ///
+    /// use nt4::wpimath::SwerveModuleVelocity;
+    /// let modules = server.publish::<Vec<SwerveModuleVelocity>>("/drive/modules");
+    /// assert!(server.has_schema("struct:Rotation2d")); // nested schemas too
+    /// modules.set(vec![SwerveModuleVelocity::default(); 4]);
     /// # }
     /// ```
     pub fn publish<T: NtValue>(&self, name: &str) -> Publisher<T> {
+        T::for_each_schema(&mut |name, ty, data| self.add_schema(name, ty, data));
         Publisher::new(self.publish_generic(name, T::nt_type(), Properties::new()))
+    }
+
+    /// Publish a data schema on `/.schema/<name>` (retained, with the schema
+    /// as a default value), once: later calls with the same name do
+    /// nothing, as with ntcore's `AddSchema`. [`publish`](Self::publish)
+    /// does this for struct and protobuf types; call it yourself for raw
+    /// topics published with [`publish_generic`](Self::publish_generic).
+    ///
+    /// The schema stays published until the server stops.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Server, ServerConfig};
+    /// let server = Server::start(ServerConfig::port(0)).await.unwrap();
+    /// server.add_schema("struct:Point", "structschema", b"double x;double y");
+    /// assert!(server.has_schema("struct:Point"));
+    /// # }
+    /// ```
+    pub fn add_schema(&self, name: &str, ty: &str, schema: &[u8]) {
+        let mut state = self.shared.lock();
+        if !state.schemas.insert(name.to_owned()) {
+            return;
+        }
+        let id = state.core.publish(
+            &format!("{}{name}", crate::structs::SCHEMA_PREFIX),
+            NtType::from(ty),
+            crate::structs::schema_properties(),
+        );
+        // The type is raw (id 5) whatever the schema type, so this can't fail.
+        let _ = state.core.set_value(id, Value::Raw(schema.to_vec()), 0);
+        state.settle();
+    }
+
+    /// Whether [`add_schema`](Self::add_schema) (or a typed
+    /// [`publish`](Self::publish)) has published schema `name`.
+    pub fn has_schema(&self, name: &str) -> bool {
+        self.shared.lock().schemas.contains(name)
     }
 
     /// Publish a topic with any type string and initial properties, for
