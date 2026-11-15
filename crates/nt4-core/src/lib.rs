@@ -32,12 +32,14 @@
 //! client.handle_binary(200, &reply);
 //! assert_eq!(client.server_time_offset(), Some(5_000 + 100 - 200));
 //!
-//! // Now the subscription goes out on the next tick (the queue sends at
-//! // most every 5 ms, counted from time 0).
-//! client.send_outgoing(10_000, false);
-//! assert_eq!(client.poll_transmit(), Some(Transmit::Ping));
+//! // The subscription was waiting for the time offset and goes out with it.
 //! let Some(Transmit::Text(sub)) = client.poll_transmit() else { panic!() };
 //! assert!(sub.contains(r#""method":"subscribe""#));
+//!
+//! // Call `send_outgoing` on every tick: it sends keepalive pings and
+//! // whatever is due.
+//! client.send_outgoing(10_000, false);
+//! assert_eq!(client.poll_transmit(), Some(Transmit::Ping));
 //! ```
 
 pub mod client;
