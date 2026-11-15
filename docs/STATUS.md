@@ -71,10 +71,10 @@ progress.
 ### Running it
 
 CI runs the fuzzer with the ntcore oracle for 60 seconds on each push (the
-`fuzz` job, Linux only). That is about 115,000 frames, spread over the three
-targets. The seed is the run id, printed on the first line, so a failure
-reproduces locally with `--seed`. Locally, a release build takes about 10
-seconds; see `crates/nt4-fuzz/README.md` for longer runs.
+`fuzz` job, Linux only). On GitHub's runners that is about 230,000 frames
+over the three targets, and the whole job takes about 1.5 minutes. The seed
+is the run id, printed on the first line, so a failure reproduces locally
+with `--seed`. See `crates/nt4-fuzz/README.md` for longer local runs.
 
 ## Next steps
 
