@@ -3,7 +3,9 @@
 //! With the `client` feature (on by default), [`Client`] connects to an NT4
 //! server such as robot code, keeps the connection and time sync alive,
 //! reconnects when it drops, and gives typed [`Publisher`]s and
-//! [`Subscriber`]s.
+//! [`Subscriber`]s. With the `server` feature, [`Server`] is an NT4 server
+//! that ntcore clients (dashboards, robot code, coprocessors) connect to,
+//! with the same typed handles for the server's own topics.
 //!
 //! The protocol work happens in [`nt4_core`], which has no I/O; this crate
 //! adds the WebSocket (tokio-tungstenite) and the clock.
@@ -19,21 +21,38 @@
 //! # }
 //! ```
 //!
-//! Re-exports: [`Event`], [`PublishOptions`], [`TopicValue`] from
+//! Re-exports: [`Event`], [`ServerEvent`], [`PublishOptions`], [`TopicValue`] from
 //! [`nt4_core`], and [`NtType`], [`Value`], [`Properties`],
 //! [`SubscriptionOptions`] from [`nt4_proto`].
 
+// The docs link the client and server to each other. With only one of the
+// two features those links have nothing to point at; docs.rs builds with
+// all features, where they resolve.
+#![cfg_attr(
+    not(all(feature = "client", feature = "server")),
+    allow(rustdoc::broken_intra_doc_links)
+)]
+
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(any(feature = "client", feature = "server"))]
+pub mod handles;
+#[cfg(feature = "server")]
+pub mod server;
 pub mod typed;
 
 #[cfg(feature = "client")]
-pub use client::{
-    Client, ClientConfig, ClientStopped, Events, GenericPublisher, Publisher, Subscriber,
-    SubscriptionHandle,
+pub use client::{Client, ClientConfig};
+#[cfg(any(feature = "client", feature = "server"))]
+pub use handles::{
+    ClientStopped, Events, GenericPublisher, Publisher, Subscriber, SubscriptionHandle,
 };
-pub use nt4_core::{ClientError, Event, ProtocolVersion, PublishOptions, Topic, TopicValue};
+pub use nt4_core::{
+    ClientError, Event, ProtocolVersion, PublishOptions, ServerEvent, Topic, TopicValue,
+};
 pub use nt4_proto::{NtType, Properties, SubscriptionOptions, Value};
+#[cfg(feature = "server")]
+pub use server::{ConnectedClient, Server, ServerConfig};
 pub use typed::NtValue;
 
 /// The wire format crate, [`nt4_proto`], for constants such as

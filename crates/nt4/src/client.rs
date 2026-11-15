@@ -25,7 +25,6 @@
 //! ```
 
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -44,6 +43,9 @@ use tokio_tungstenite::tungstenite::{
 };
 
 use crate::NtValue;
+use crate::handles::{
+    Backend, Events, GenericPublisher, Publisher, Subscriber, SubscriptionHandle,
+};
 
 /// How to find and identify with the server.
 #[derive(Debug, Clone, PartialEq)]
@@ -143,6 +145,23 @@ impl Shared {
     }
 }
 
+impl Backend for Shared {
+    fn now_us(&self) -> i64 {
+        Shared::now_us(self)
+    }
+    fn set_value(&self, id: PubId, value: Value, time_us: i64) -> Result<(), ClientError> {
+        self.lock().core.set_value(id, value, time_us)
+    }
+    fn unpublish(&self, id: PubId) {
+        self.lock().core.unpublish(id);
+        self.wake.notify_one();
+    }
+    fn unsubscribe(&self, id: SubId) {
+        self.lock().core.unsubscribe(id);
+        self.wake.notify_one();
+    }
+}
+
 /// Stops the background task when the last [`Client`] handle is dropped.
 struct StopGuard(watch::Sender<bool>);
 
@@ -209,10 +228,7 @@ impl Client {
     /// # }
     /// ```
     pub fn publish<T: NtValue>(&self, name: &str, options: PublishOptions) -> Publisher<T> {
-        Publisher {
-            inner: self.publish_generic(name, T::nt_type(), Properties::new(), options),
-            _ty: PhantomData,
-        }
+        Publisher::new(self.publish_generic(name, T::nt_type(), Properties::new(), options))
     }
 
     /// Publish a topic with any type string and initial properties, for
@@ -243,10 +259,7 @@ impl Client {
             .core
             .publish(name, ty, properties, options);
         self.shared.wake.notify_one();
-        GenericPublisher {
-            shared: self.shared.clone(),
-            id,
-        }
+        GenericPublisher::new(self.shared.clone(), id)
     }
 
     /// Subscribe to one topic and keep its latest value.
@@ -272,14 +285,7 @@ impl Client {
             .subscribe();
         drop(state);
         self.shared.wake.notify_one();
-        Subscriber {
-            handle: SubscriptionHandle {
-                shared: self.shared.clone(),
-                id,
-            },
-            rx,
-            _ty: PhantomData,
-        }
+        Subscriber::new(SubscriptionHandle::new(self.shared.clone(), id), rx)
     }
 
     /// Subscribe to several topics or prefixes (with `options.prefix`).
@@ -303,10 +309,7 @@ impl Client {
     ) -> SubscriptionHandle {
         let id = self.shared.lock().core.subscribe(topics, options);
         self.shared.wake.notify_one();
-        SubscriptionHandle {
-            shared: self.shared.clone(),
-            id,
-        }
+        SubscriptionHandle::new(self.shared.clone(), id)
     }
 
     /// Change a topic's properties on the server (`null` deletes one).
@@ -321,9 +324,9 @@ impl Client {
     /// Like ntcore's listener queues, the queue has no size limit: read it
     /// steadily, or drop the [`Events`] to stop collecting.
     pub fn events(&self) -> Events {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, events) = Events::new();
         self.shared.lock().listeners.push(tx);
-        Events { rx }
+        events
     }
 
     /// Send everything queued now instead of on the next period.
@@ -400,175 +403,6 @@ impl Client {
                 Ok(Some(_)) => {}
             }
         }
-    }
-}
-
-/// The event queue from [`Client::events`].
-#[derive(Debug)]
-pub struct Events {
-    rx: mpsc::UnboundedReceiver<Event>,
-}
-
-impl Events {
-    /// The next event, waiting if there is none. `None` once the client
-    /// has stopped and every event has been read.
-    pub async fn recv(&mut self) -> Option<Event> {
-        self.rx.recv().await
-    }
-
-    /// The next event if one is waiting, without waiting.
-    pub fn try_recv(&mut self) -> Option<Event> {
-        self.rx.try_recv().ok()
-    }
-
-    /// How many events are waiting.
-    pub fn len(&self) -> usize {
-        self.rx.len()
-    }
-
-    /// Whether no events are waiting.
-    pub fn is_empty(&self) -> bool {
-        self.rx.is_empty()
-    }
-}
-
-/// A publisher of any type, from [`Client::publish_generic`]. Dropping it
-/// unpublishes.
-pub struct GenericPublisher {
-    shared: Arc<Shared>,
-    id: PubId,
-}
-
-impl std::fmt::Debug for GenericPublisher {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GenericPublisher")
-            .field("id", &self.id)
-            .finish()
-    }
-}
-
-impl GenericPublisher {
-    /// Set the value, timestamped now.
-    pub fn set(&self, value: Value) -> Result<(), ClientError> {
-        let now = self.shared.now_us();
-        self.set_at(value, now)
-    }
-
-    /// Set the value with a timestamp from [`Client::now_us`]; 0 sets it as
-    /// a default that any other value overrides.
-    pub fn set_at(&self, value: Value, time_us: i64) -> Result<(), ClientError> {
-        self.shared.lock().core.set_value(self.id, value, time_us)
-    }
-}
-
-impl Drop for GenericPublisher {
-    fn drop(&mut self) {
-        self.shared.lock().core.unpublish(self.id);
-        self.shared.wake.notify_one();
-    }
-}
-
-/// A typed publisher, from [`Client::publish`]. Dropping it unpublishes.
-#[derive(Debug)]
-pub struct Publisher<T> {
-    inner: GenericPublisher,
-    _ty: PhantomData<fn(T)>,
-}
-
-impl<T: NtValue> Publisher<T> {
-    /// Set the value, timestamped now.
-    pub fn set(&self, value: T) {
-        // The type always matches, so this cannot fail.
-        let _ = self.inner.set(value.into_value());
-    }
-
-    /// Set the value with a timestamp from [`Client::now_us`].
-    pub fn set_at(&self, value: T, time_us: i64) {
-        let _ = self.inner.set_at(value.into_value(), time_us);
-    }
-
-    /// Set a default: sent with timestamp 0, so any other publisher's value
-    /// wins over it.
-    pub fn set_default(&self, value: T) {
-        let _ = self.inner.set_at(value.into_value(), 0);
-    }
-}
-
-/// A subscription; dropping it unsubscribes.
-pub struct SubscriptionHandle {
-    shared: Arc<Shared>,
-    id: SubId,
-}
-
-impl std::fmt::Debug for SubscriptionHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SubscriptionHandle")
-            .field("id", &self.id)
-            .finish()
-    }
-}
-
-impl Drop for SubscriptionHandle {
-    fn drop(&mut self) {
-        self.shared.lock().core.unsubscribe(self.id);
-        self.shared.wake.notify_one();
-    }
-}
-
-/// Returned by [`Subscriber::changed`] after the client stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClientStopped;
-
-impl std::fmt::Display for ClientStopped {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the NT client has stopped")
-    }
-}
-
-impl std::error::Error for ClientStopped {}
-
-/// A typed subscriber to one topic, from [`Client::subscribe`].
-#[derive(Debug)]
-pub struct Subscriber<T> {
-    handle: SubscriptionHandle,
-    rx: watch::Receiver<Option<TopicValue>>,
-    _ty: PhantomData<fn() -> T>,
-}
-
-impl<T: NtValue> Subscriber<T> {
-    /// The latest value, or `None` if nothing (of type `T`) has arrived.
-    /// The last value is kept after a disconnect.
-    pub fn get(&self) -> Option<T> {
-        self.rx
-            .borrow()
-            .as_ref()
-            .and_then(|v| T::from_value(&v.value))
-    }
-
-    /// The latest value, or `default`.
-    pub fn get_or(&self, default: T) -> T {
-        self.get().unwrap_or(default)
-    }
-
-    /// The latest value with its timestamps.
-    pub fn get_timestamped(&self) -> Option<(T, TopicValue)> {
-        let v = self.rx.borrow().clone()?;
-        Some((T::from_value(&v.value)?, v))
-    }
-
-    /// Wait for a value newer than the latest one when called, then return
-    /// it (`Ok(None)` if it has another type than `T`). Errors once the
-    /// client has stopped.
-    pub async fn changed(&mut self) -> Result<Option<T>, ClientStopped> {
-        // Only values that arrive after this call count.
-        self.rx.borrow_and_update();
-        self.rx.changed().await.map_err(|_| ClientStopped)?;
-        Ok(self.get())
-    }
-
-    /// The handle that keeps this subscription alive.
-    pub fn handle(&self) -> &SubscriptionHandle {
-        &self.handle
     }
 }
 

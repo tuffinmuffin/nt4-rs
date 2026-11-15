@@ -4,9 +4,17 @@ Reads one JSON command per line on stdin and writes one JSON reply per line
 on stdout. The Rust tests in tests/interop.rs drive it; run it by hand with
 `python -u ntcore_peer.py` and type commands to try it.
 
-Commands:
-  {"cmd": "start_server", "port": 5810}
+Commands (the peer is an ntcore server or an ntcore client):
+  {"cmd": "start_server", "port": 5810, "persist": "networktables.json"}
   {"cmd": "stop_server"}
+  {"cmd": "start_client", "name": "dash", "port": 5810, "host": "127.0.0.1"}
+  {"cmd": "stop_client"}
+  {"cmd": "connected"}
+  {"cmd": "time_offset"}
+  {"cmd": "unpublish", "name": "/x"}
+  {"cmd": "set_properties", "name": "/x", "properties": {"retained": true}}
+  {"cmd": "properties", "name": "/x"}
+  {"cmd": "topics", "prefix": "/"}
   {"cmd": "publish", "name": "/x", "type": "double", "value": 1.5}
   {"cmd": "subscribe", "name": "/x"}
   {"cmd": "get", "name": "/x", "timeout": 5, "not": <value to wait past>}
@@ -17,11 +25,16 @@ Written by Claude. Uses the pyntcore 2027 API (snake_case names; times are
 nanoseconds there, reported here in microseconds as on the wire).
 """
 
+import gc
 import json
 import sys
 import time
 
 import ntcore
+
+# The tests speak UTF-8 JSON; Windows would read stdin as its ANSI code page.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 
 inst = ntcore.NetworkTableInstance.create()
 publishers = {}
@@ -61,11 +74,36 @@ def subscriber(name):
 def handle(cmd):
     c = cmd["cmd"]
     if c == "start_server":
-        inst.start_server("", "127.0.0.1", "", cmd["port"])
+        inst.start_server(cmd.get("persist", ""), "127.0.0.1", "", cmd["port"])
         return {"ok": True}
     if c == "stop_server":
         inst.stop_server()
         return {"ok": True}
+    if c == "start_client":
+        inst.start_client(cmd["name"])
+        inst.set_server(cmd.get("host", "127.0.0.1"), cmd["port"])
+        return {"ok": True}
+    if c == "stop_client":
+        inst.stop_client()
+        return {"ok": True}
+    if c == "connected":
+        return {"ok": True, "connected": inst.is_connected()}
+    if c == "time_offset":
+        offset = inst.get_server_time_offset()
+        return {"ok": True, "offset": None if offset is None else offset // 1000}
+    if c == "unpublish":
+        # pyntcore 2027 publishers have no close(); they unpublish when freed.
+        del publishers[cmd["name"]]
+        gc.collect()
+        return {"ok": True}
+    if c == "set_properties":
+        inst.get_topic(cmd["name"]).set_properties(cmd["properties"])
+        return {"ok": True}
+    if c == "properties":
+        return {"ok": True, "properties": inst.get_topic(cmd["name"]).get_properties()}
+    if c == "topics":
+        names = [t.get_name() for t in inst.get_topics(cmd.get("prefix", ""))]
+        return {"ok": True, "names": sorted(names)}
     if c == "publish":
         name, ty = cmd["name"], cmd["type"]
         if name not in publishers:

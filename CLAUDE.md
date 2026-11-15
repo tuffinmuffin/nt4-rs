@@ -29,8 +29,11 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   `Subscriber<T>` via `NtValue`. Interop tests in `tests/interop.rs` drive a
   real ntcore through `tests/interop/ntcore_peer.py` (JSON lines on stdin);
   they skip unless `NT4_INTEROP_PYTHON` points at a Python with pyntcore.
-- Planned: the `server` feature in `nt4` (tokio server around `ServerCore`,
-  persistence file).
+- `nt4`'s `server` feature: `Server` (listen, handshake, one task per
+  connection around a shared `ServerCore`, persistent file). The handle
+  types (`Publisher<T>`, `Subscriber<T>`, `Events`) live in `handles.rs` and
+  serve both runtimes. Server interop tests are `tests/interop_server.rs`
+  (pyntcore as the client). Build and test with `--all-features`.
 
 ## Rules
 
@@ -52,13 +55,13 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
 ## Commands
 
 ```bash
-cargo test --workspace
+cargo test --workspace --all-features
 cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 python3 scripts/upstream_audit.py <allwpilib checkout>
-NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --test interop
+NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --all-features --test interop --test interop_server
 # coverage, as the CI `coverage` job measures it (needs cargo-llvm-cov)
-cargo llvm-cov -p nt4-proto -p nt4-core -p nt4 --ignore-filename-regex '(tests|examples|benches)/' --html
+cargo llvm-cov -p nt4-proto -p nt4-core -p nt4 --all-features --ignore-filename-regex '(tests|examples|benches)/' --html
 ```
 
 ntcore facts learned from interop: the server always renames a client to

@@ -70,6 +70,7 @@ use crate::client::{PING_INTERVAL_MS, PING_TIMEOUT_MS, ProtocolVersion, PubId, S
 use crate::frames::{FrameBuffer, queue_ms, to_ms};
 use crate::meta::Writer;
 use crate::outgoing::{self, DEFAULT_PERIOD_MS, OutgoingQueue, SendMode};
+use crate::persistent;
 
 /// The slot of the server's own (local) client.
 const LOCAL: usize = 0;
@@ -335,6 +336,9 @@ pub struct ServerCore {
     next_pubuid: i32,
     next_subuid: i32,
     events: VecDeque<Event>,
+    /// A persistent topic's value or properties changed since the last
+    /// [`ServerCore::persistent_changed`].
+    persistent_changed: bool,
 }
 
 impl Default for ServerCore {
@@ -386,6 +390,7 @@ impl ServerCore {
             next_pubuid: 1,
             next_subuid: 1,
             events: VecDeque::new(),
+            persistent_changed: false,
         };
         // Same order as ntcore, so topic ids match: the local client's meta
         // topics, then $clients.
@@ -698,6 +703,21 @@ impl ServerCore {
         self.remote_mut(id.0)?.wire.out.pop_front()
     }
 
+    /// Whether [`poll_transmit`](Self::poll_transmit) has a frame for this
+    /// client, so a runtime can wake only the connections with work.
+    ///
+    /// ```
+    /// use nt4_core::{ProtocolVersion, ServerCore};
+    /// let mut server = ServerCore::new();
+    /// let (id, _) = server.add_client("c", "10.0.0.2:1", false, ProtocolVersion::V4_1);
+    /// assert!(!server.has_transmit(id));
+    /// server.send_outgoing(id, 1_000, false); // the first keepalive ping
+    /// assert!(server.has_transmit(id));
+    /// ```
+    pub fn has_transmit(&self, id: ClientId) -> bool {
+        self.remote(id.0).is_some_and(|r| !r.wire.out.is_empty())
+    }
+
     /// The next event, oldest first.
     pub fn poll_event(&mut self) -> Option<Event> {
         self.events.pop_front()
@@ -803,6 +823,114 @@ impl ServerCore {
             self.client_unsubscribe(LOCAL, id.0);
             self.update_meta_client_sub(LOCAL);
         }
+    }
+
+    // ----- Persistent values -----
+
+    /// Whether a persistent topic's value or properties changed since the
+    /// last call; the flag clears. ntcore checks it once a second and saves
+    /// [`dump_persistent`](Self::dump_persistent) when it is set.
+    ///
+    /// ```
+    /// use nt4_core::ServerCore;
+    /// use nt4_proto::{NtType, Properties, Value};
+    /// let mut server = ServerCore::new();
+    /// let mut props = Properties::new();
+    /// props.insert("persistent".into(), true.into());
+    /// let p = server.publish("/gain", NtType::Double, props);
+    /// assert!(!server.persistent_changed());
+    /// server.set_value(p, Value::Double(0.5), 1).unwrap();
+    /// assert!(server.persistent_changed());
+    /// assert!(!server.persistent_changed());
+    /// ```
+    pub fn persistent_changed(&mut self) -> bool {
+        std::mem::take(&mut self.persistent_changed)
+    }
+
+    /// Every persistent topic that has a value, as the JSON file ntcore
+    /// saves (`networktables.json`), byte for byte.
+    ///
+    /// ```
+    /// use nt4_core::ServerCore;
+    /// use nt4_proto::{NtType, Properties, Value};
+    /// let mut server = ServerCore::new();
+    /// let mut props = Properties::new();
+    /// props.insert("persistent".into(), true.into());
+    /// let p = server.publish("/gain", NtType::Double, props);
+    /// server.set_value(p, Value::Double(0.5), 1).unwrap();
+    /// assert_eq!(
+    ///     server.dump_persistent(),
+    ///     "[\n  {\n    \"name\": \"\\/gain\",\n    \"type\": \"double\",\n    \"value\": 0.5,\n    \"properties\": {\"persistent\": true}\n  }\n]\n"
+    /// );
+    /// ```
+    pub fn dump_persistent(&self) -> String {
+        let mut out = String::from("[\n");
+        let mut first = true;
+        for t in self.topics.iter().flatten() {
+            let (true, Some((_, value))) = (t.persistent, &t.last_value) else {
+                continue;
+            };
+            if !first {
+                out.push_str(",\n");
+            }
+            first = false;
+            out.push_str("  {\n    \"name\": ");
+            persistent::push_string(&mut out, &t.name);
+            out.push_str(",\n    \"type\": ");
+            persistent::push_string(&mut out, &t.ty.to_string());
+            out.push_str(",\n    \"value\": ");
+            persistent::push_value(&mut out, value);
+            out.push_str(",\n    \"properties\": ");
+            persistent::push_json(&mut out, &Json::Object(t.properties.clone()), 0);
+            out.push_str("\n  }");
+        }
+        out.push_str("\n]\n");
+        out
+    }
+
+    /// Load a persistent file (as [`dump_persistent`](Self::dump_persistent)
+    /// writes it): each entry becomes a topic with its value, stamped
+    /// `now_us`. Returns one line per problem, `"<index>: <error>"` in
+    /// ntcore's words; entries with a problem are skipped. Loading doesn't
+    /// count as a change for [`persistent_changed`](Self::persistent_changed).
+    ///
+    /// ```
+    /// use nt4_core::ServerCore;
+    /// let mut server = ServerCore::new();
+    /// let errors = server.load_persistent(
+    ///     r#"[{"name": "/a", "type": "int", "value": 3, "properties": {"persistent": true}},
+    ///         {"name": "/b", "type": "int", "value": 4, "properties": {}}]"#,
+    ///     1,
+    /// );
+    /// assert_eq!(errors, ["1: no persistent property"]);
+    /// assert!(server.dump_persistent().contains(r#""\/a""#));
+    /// ```
+    pub fn load_persistent(&mut self, json: &str, now_us: i64) -> Vec<String> {
+        if json.is_empty() {
+            return Vec::new();
+        }
+        let items = match serde_json::from_str::<Json>(json) {
+            Err(e) => return vec![format!("could not decode JSON: {e}")],
+            Ok(Json::Array(items)) => items,
+            Ok(_) => return vec!["expected JSON array at top level".into()],
+        };
+        let changed = self.persistent_changed;
+        let mut errors = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            match persistent::parse_entry(item) {
+                Err(e) => errors.push(format!("{i}: {e}")),
+                Ok(entry) => {
+                    if let Some(e) = entry.skipped {
+                        errors.push(format!("{i}: {e}"));
+                    }
+                    let topic =
+                        self.create_topic(None, &entry.name, entry.ty, &entry.properties, false);
+                    self.set_value_from(None, topic, now_us, &entry.value);
+                }
+            }
+        }
+        self.persistent_changed = changed;
+        errors
     }
 
     // ----- Client requests (ServerClient4Base) -----
@@ -1296,6 +1424,7 @@ impl ServerCore {
             return;
         }
         let t = self.topic_mut(topic);
+        let was_persistent = t.persistent;
         for (k, v) in update {
             if v.is_null() {
                 t.properties.remove(k);
@@ -1303,7 +1432,11 @@ impl ServerCore {
                 t.properties.insert(k.clone(), v.clone());
             }
         }
-        if let Some(w) = t.refresh_properties() {
+        let warning = t.refresh_properties();
+        if t.persistent || was_persistent {
+            self.persistent_changed = true;
+        }
+        if let Some(w) = warning {
             self.warn(w);
         }
         // Removing `persistent` or `retained` can leave it unpublished.
@@ -1331,7 +1464,11 @@ impl ServerCore {
         if t.cached && newer {
             t.last_value = Some((time_us, value.clone()));
             t.last_value_client = sender;
+            if t.persistent {
+                self.persistent_changed = true;
+            }
         }
+        let t = self.topic(topic);
         let targets: Vec<(usize, SendMode)> = t
             .clients
             .iter()

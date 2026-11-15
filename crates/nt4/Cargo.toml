@@ -1,6 +1,6 @@
 [package]
 name = "nt4"
-description = "NetworkTables 4.1 for tokio: a client that connects, reconnects and keeps time sync, with typed publishers and subscribers"
+description = "NetworkTables 4.1 for tokio: a client that connects, reconnects and keeps time sync, and a server, with typed publishers and subscribers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,6 +15,8 @@ categories = ["network-programming", "asynchronous", "science::robotics"]
 default = ["client"]
 ## The NT4 client.
 client = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
+## The NT4 server.
+server = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
 
 [dependencies]
 nt4-proto = { path = "../nt4-proto", version = "0.1.0" }
@@ -32,3 +34,7 @@ all-features = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "server"
+required-features = ["server"]

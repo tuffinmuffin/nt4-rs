@@ -17,6 +17,7 @@ topics, 150 of them updated every loop):
 | `encode_publish` | encode the client's publish frame for 200 topics | 399,000 |
 | `client_receive` | `ClientCore` takes 150 values and hands out the events | 192,000 |
 | `client_publish` | `ClientCore` sets 150 values and builds the frames to send | 1,246,000 |
+| `server_relay` | `ServerCore` takes a robot's 150 values and builds the frames for a dashboard subscribed to all of them | (new; see the PR's `perf` job) |
 
 ## Running
 

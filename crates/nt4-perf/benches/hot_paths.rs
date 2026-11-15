@@ -19,7 +19,7 @@
 use std::hint::black_box;
 
 use gungraun::prelude::*;
-use nt4_core::{ClientCore, PubId};
+use nt4_core::{ClientCore, ClientId, PubId, ServerCore};
 use nt4_proto::{
     BinaryMessage, BinaryReader, ClientMessage, Value, decode_server_text, encode_binary,
     encode_text_frame,
@@ -82,6 +82,22 @@ fn client_publish((mut core, values): (ClientCore, Vec<(PubId, Value)>)) -> usiz
     std::iter::from_fn(|| core.poll_transmit()).count()
 }
 
+fn relay_setup() -> ((ServerCore, ClientId, ClientId), Vec<u8>) {
+    (nt4_perf::relaying_server(), nt4_perf::periodic_frame())
+}
+
+// The server takes a robot's loop of 150 values and builds the frames for a
+// dashboard subscribed to all of them.
+#[library_benchmark]
+#[bench::periodic(setup = relay_setup)]
+fn server_relay(
+    ((mut server, robot, dash), frame): ((ServerCore, ClientId, ClientId), Vec<u8>),
+) -> usize {
+    server.handle_binary(robot, 20_000, black_box(&frame));
+    server.send_outgoing(dash, 20_000, true);
+    std::iter::from_fn(|| server.poll_transmit(dash)).count()
+}
+
 library_benchmark_group!(
     name = proto,
     benchmarks = [
@@ -97,4 +113,6 @@ library_benchmark_group!(
     benchmarks = [client_receive, client_publish]
 );
 
-main!(library_benchmark_groups = proto, client_core);
+library_benchmark_group!(name = server_core, benchmarks = [server_relay]);
+
+main!(library_benchmark_groups = proto, client_core, server_core);
