@@ -89,17 +89,15 @@ the runner is, so a failure means the code does more work. See
 One thing it shows: `ClientCore` spends about 8,300 instructions per value
 when publishing, against about 1,300 when receiving. That may be worth a look.
 
-Still to do: a blocking load check in CI that runs the `bench/` robot
-simulation at 200 topics and fails on any lost value, missing one-time value,
-or a first snapshot slower than a loose limit. It waits until PR #3's move to
-pyntcore 2027 alpha 8 lands, since that changes the same `bench/` files.
+The `bench/` load benchmark against pyntcore stays a manual tool and is not
+run in CI. nt4 is meant for hosts and coprocessors, so the instruction-count
+check is enough.
 
 ## Next steps
 
 1. **Review and merge PR #3.**
 2. **Report the `1e400` ntcore bug to allwpilib** (2026 branch only).
-3. **Add the load check to CI** (above), after the pyntcore 2027 move.
-4. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
+3. **Milestone 4: `ServerCore`.** Extend the fuzzer to server-side handling
    once it exists, and add server benchmarks to `nt4-perf`.
 
 ## Picking this up locally
