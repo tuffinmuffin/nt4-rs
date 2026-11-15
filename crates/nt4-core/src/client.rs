@@ -41,6 +41,7 @@ use nt4_proto::{
     SUBPROTOCOL_V4_1, ServerMessage, SubscriptionOptions, Value, decode_server_text, encode_binary,
 };
 
+use crate::frames::{FrameBuffer, queue_ms, to_ms};
 use crate::outgoing::{self, OutgoingQueue, SendMode, Wire};
 use crate::time_sync::{TimeSync, TimeSyncUpdate};
 
@@ -93,7 +94,7 @@ impl ProtocolVersion {
 
 /// A publisher, returned by [`ClientCore::publish`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PubId(i32);
+pub struct PubId(pub(crate) i32);
 
 impl PubId {
     /// The `pubuid` sent to the server.
@@ -104,7 +105,7 @@ impl PubId {
 
 /// A subscription, returned by [`ClientCore::subscribe`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SubId(i32);
+pub struct SubId(pub(crate) i32);
 
 impl SubId {
     /// The `subuid` sent to the server.
@@ -138,11 +139,7 @@ impl PublishOptions {
         };
         // `as` saturates, like ntcore's cast for any sane input.
         let ms = (periodic * 1000.0) as u32;
-        let mut rounded = ms - ms % 10;
-        if ms % 10 >= 5 && rounded <= u32::MAX - 10 {
-            rounded += 10;
-        }
-        rounded.max(outgoing::MIN_PERIOD_MS)
+        outgoing::round_periodic_ms(ms).max(outgoing::MIN_PERIOD_MS)
     }
 }
 
@@ -278,74 +275,6 @@ struct Subscription {
     options: SubscriptionOptions,
 }
 
-/// Collects the queue's output into WebSocket frames: consecutive text
-/// messages share one JSON array frame, consecutive values one binary frame.
-#[derive(Debug, Default)]
-struct FrameBuffer {
-    out: VecDeque<Transmit>,
-    text: Option<String>,
-    binary: Option<Vec<u8>>,
-    blocked: bool,
-}
-
-impl FrameBuffer {
-    fn finish(&mut self) {
-        if let Some(mut t) = self.text.take() {
-            t.push(']');
-            self.out.push_back(Transmit::Text(t));
-        }
-        if let Some(b) = self.binary.take() {
-            self.out.push_back(Transmit::Binary(b));
-        }
-    }
-
-    fn clear(&mut self) {
-        self.out.clear();
-        self.text = None;
-        self.binary = None;
-    }
-}
-
-impl Wire for FrameBuffer {
-    fn ready(&self) -> bool {
-        !self.blocked
-    }
-    fn write_text(&mut self, json: &str) -> usize {
-        if self.binary.is_some() {
-            self.finish();
-        }
-        match &mut self.text {
-            Some(t) => {
-                t.push(',');
-                t.push_str(json);
-            }
-            None => self.text = Some(format!("[{json}")),
-        }
-        0
-    }
-    fn write_binary(&mut self, data: &[u8]) -> usize {
-        if self.text.is_some() {
-            self.finish();
-        }
-        self.binary
-            .get_or_insert_with(Vec::new)
-            .extend_from_slice(data);
-        0
-    }
-    fn flush(&mut self) -> usize {
-        self.finish();
-        0
-    }
-    fn send_text(&mut self, json: &str) {
-        self.finish();
-        self.out.push_back(Transmit::Text(format!("[{json}]")));
-    }
-    fn send_binary(&mut self, data: &[u8]) {
-        self.finish();
-        self.out.push_back(Transmit::Binary(data.to_vec()));
-    }
-}
-
 /// State that lasts for one connection.
 #[derive(Debug)]
 struct Connection {
@@ -384,20 +313,6 @@ impl Default for ClientCore {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// The time to give [`OutgoingQueue::send_outgoing`]. The queue (like
-/// ntcore's) starts with "last sent at 0 ms" and sends at most every
-/// `MIN_PERIOD_MS`, so on a clock that starts at 0 it would hold everything
-/// back for the first few milliseconds, and the messages waiting for the
-/// first RTT reply would miss it and wait for the next tick. ntcore's clock
-/// never reads that low; shift ours so it doesn't either.
-fn queue_ms(now_us: i64) -> u64 {
-    to_ms(now_us) + u64::from(outgoing::MIN_PERIOD_MS)
-}
-
-fn to_ms(us: i64) -> u64 {
-    u64::try_from(us / 1000).unwrap_or(0)
 }
 
 fn apply_update(props: &mut Properties, update: &Properties) {

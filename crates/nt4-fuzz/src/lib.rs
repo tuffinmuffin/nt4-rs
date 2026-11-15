@@ -701,6 +701,62 @@ pub fn drive_client_core(target: Target, input: &[u8]) {
     while core.poll_transmit().is_some() {}
 }
 
+// ----- ServerCore -----
+
+/// Feed one frame to a `ServerCore`, as sent by a client that already
+/// publishes and subscribes, with a second client watching every topic
+/// (meta topics included). Then remove the sender, so the cleanup paths run
+/// too. Panics are the failure this looks for.
+pub fn drive_server_core(target: Target, input: &[u8]) {
+    use nt4_core::{ProtocolVersion, ServerCore};
+    use nt4_proto::{ClientMessage, NtType, Properties, SubscriptionOptions, encode_text_frame};
+    let mut server = ServerCore::new();
+    let p = server.publish("/server/x", NtType::Double, Properties::new());
+    let _ = server.set_value(p, Value::Double(1.0), 10);
+    let prefix = |all: bool| SubscriptionOptions {
+        prefix: true,
+        all,
+        ..Default::default()
+    };
+    server.subscribe(vec![String::new()], prefix(false));
+
+    let (sender, _) = server.add_client("fuzz", "10.0.0.2:1", false, ProtocolVersion::V4_1);
+    let (watcher, _) = server.add_client("watch", "127.0.0.1:2", true, ProtocolVersion::V4_0);
+    // Publishers on pubuids 0..8 so value frames have topics to land on.
+    let mut setup: Vec<ClientMessage> = (0..8)
+        .map(|i| ClientMessage::Publish {
+            name: format!("/t{i}"),
+            pubuid: i,
+            ty: NtType::Double,
+            properties: Properties::new(),
+        })
+        .collect();
+    setup.push(ClientMessage::Subscribe {
+        subuid: 1,
+        topics: vec![String::new()],
+        options: prefix(true),
+    });
+    server.handle_text(sender, 1_000, &encode_text_frame(&setup));
+    let watch = ClientMessage::Subscribe {
+        subuid: 1,
+        topics: vec![String::new(), "$".into()],
+        options: prefix(false),
+    };
+    server.handle_text(watcher, 1_000, &encode_text_frame(&[watch]));
+
+    match target {
+        Target::Binary => server.handle_binary(sender, 3_000, input),
+        _ => server.handle_text(sender, 3_000, &String::from_utf8_lossy(input)),
+    }
+    server.send_all_outgoing(400_000, true);
+    server.remove_client(sender);
+    server.send_all_outgoing(500_000, true);
+    while server.poll_event().is_some() {}
+    for id in [sender, watcher] {
+        while server.poll_transmit(id).is_some() {}
+    }
+}
+
 #[cfg(has_ntcore)]
 #[allow(unsafe_code)]
 mod oracle {

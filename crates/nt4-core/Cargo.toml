@@ -1,6 +1,6 @@
 [package]
 name = "nt4-core"
-description = "NetworkTables 4.1 client state machine with no sockets (sans-I/O): announcements, publish/subscribe, time sync, reconnect replay"
+description = "NetworkTables 4.1 client and server state machines with no sockets (sans-I/O): announcements, publish/subscribe, time sync, meta topics, reconnect replay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

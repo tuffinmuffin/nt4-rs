@@ -182,6 +182,15 @@ pub fn calculate_period(periods: impl IntoIterator<Item = u32>) -> u32 {
     period.max(MIN_PERIOD_MS)
 }
 
+/// Round a period to the nearest 10 ms, as ntcore's `RoundPeriodicMs` does.
+pub(crate) fn round_periodic_ms(ms: u32) -> u32 {
+    let mut rounded = ms - ms % 10;
+    if ms % 10 >= 5 && rounded <= u32::MAX - 10 {
+        rounded += 10;
+    }
+    rounded
+}
+
 pub(crate) fn gcd(mut a: u32, mut b: u32) -> u32 {
     while b != 0 {
         (a, b) = (b, a % b);
