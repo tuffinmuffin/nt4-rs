@@ -167,7 +167,8 @@ fn self_check(target: Target, input: &[u8], text: &str) -> Option<String> {
             for m in &msgs {
                 encode_binary(&mut again, m);
             }
-            let back: Vec<BinaryMessage> = BinaryReader::new(&again).map_while(Result::ok).collect();
+            let back: Vec<BinaryMessage> =
+                BinaryReader::new(&again).map_while(Result::ok).collect();
             // `{:?}` so NaN compares equal to itself.
             (format!("{back:?}") != format!("{msgs:?}")).then(|| "binary round trip".into())
         }
@@ -186,19 +187,26 @@ fn self_check(target: Target, input: &[u8], text: &str) -> Option<String> {
 
 /// Where nt4 differs from ntcore on purpose, the reason, given nt4's result
 /// on the frame. Each one is listed in crates/nt4-fuzz/README.md.
-pub fn known_deviation(target: Target, text: &str, ours: &Json, theirs: &Json) -> Option<&'static str> {
+pub fn known_deviation(
+    target: Target,
+    text: &str,
+    ours: &Json,
+    theirs: &Json,
+) -> Option<&'static str> {
     if target == Target::Binary {
         return None;
     }
     let warned = |needle: &str| {
-        ours["warnings"]
-            .as_array()
-            .is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains(needle))))
+        ours["warnings"].as_array().is_some_and(|w| {
+            w.iter()
+                .any(|w| w.as_str().is_some_and(|w| w.contains(needle)))
+        })
     };
     let ntcore_warned = |needle: &str| {
-        theirs["warnings"]
-            .as_array()
-            .is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains(needle))))
+        theirs["warnings"].as_array().is_some_and(|w| {
+            w.iter()
+                .any(|w| w.as_str().is_some_and(|w| w.contains(needle)))
+        })
     };
     if warned("subuid out of range") && ntcore_warned("pubuid out of range") {
         return Some("unsubscribe's range error says subuid (ntcore says pubuid, a typo)");
@@ -207,7 +215,9 @@ pub fn known_deviation(target: Target, text: &str, ours: &Json, theirs: &Json) -
         return Some("JSON nested deeper than 128 levels is rejected");
     }
     if warned("periodic value out of range") {
-        return Some("a negative, huge or infinite periodic is rejected (ntcore converts it to unsigned ms, undefined behavior)");
+        return Some(
+            "a negative, huge or infinite periodic is rejected (ntcore converts it to unsigned ms, undefined behavior)",
+        );
     }
     if has_integer_above_i64(text) && (warned("out of range") || warned("must be a number")) {
         return Some("integers above i64::MAX are out of range (ntcore wraps them)");
@@ -220,13 +230,20 @@ fn has_integer_above_i64(text: &str) -> bool {
     let b = text.as_bytes();
     let mut i = 0;
     while i < b.len() {
-        if b[i].is_ascii_digit() && (i == 0 || !matches!(b[i - 1], b'0'..=b'9' | b'.' | b'e' | b'E' | b'-')) {
+        if b[i].is_ascii_digit()
+            && (i == 0 || !matches!(b[i - 1], b'0'..=b'9' | b'.' | b'e' | b'E' | b'-'))
+        {
             let start = i;
             while i < b.len() && b[i].is_ascii_digit() {
                 i += 1;
             }
             let integer = !matches!(b.get(i), Some(b'.' | b'e' | b'E'));
-            if integer && i - start >= 19 && text[start..i].parse::<u128>().map_or(true, |v| v > i64::MAX as u128) {
+            if integer
+                && i - start >= 19
+                && text[start..i]
+                    .parse::<u128>()
+                    .map_or(true, |v| v > i64::MAX as u128)
+            {
                 return true;
             }
         } else {
@@ -301,7 +318,11 @@ pub fn compare(target: Target, ours: &Json, theirs: &Json) -> Option<String> {
                     ours["warnings"].as_array().cloned().unwrap_or_default(),
                     theirs["warnings"].as_array().cloned().unwrap_or_default(),
                 );
-                let i = a.iter().zip(&b).position(|(x, y)| x != y).unwrap_or(a.len().min(b.len()));
+                let i = a
+                    .iter()
+                    .zip(&b)
+                    .position(|(x, y)| x != y)
+                    .unwrap_or(a.len().min(b.len()));
                 format!(
                     "text: warning differs: {} vs ntcore {}",
                     short(a.get(i)),
@@ -380,11 +401,21 @@ fn value_json(v: &Value) -> Json {
         Value::Float(x) => json!({"t": "float", "v": bits32(*x)}),
         Value::String(x) => json!({"t": "string", "v": hex(x.as_bytes())}),
         Value::Raw(x) => json!({"t": "raw", "v": hex(x)}),
-        Value::BooleanArray(a) => json!({"t": "boolean[]", "v": a.iter().map(|x| b(*x)).collect::<Vec<_>>()}),
-        Value::DoubleArray(a) => json!({"t": "double[]", "v": a.iter().map(|x| bits64(*x)).collect::<Vec<_>>()}),
-        Value::IntArray(a) => json!({"t": "int[]", "v": a.iter().map(i64::to_string).collect::<Vec<_>>()}),
-        Value::FloatArray(a) => json!({"t": "float[]", "v": a.iter().map(|x| bits32(*x)).collect::<Vec<_>>()}),
-        Value::StringArray(a) => json!({"t": "string[]", "v": a.iter().map(|x| hex(x.as_bytes())).collect::<Vec<_>>()}),
+        Value::BooleanArray(a) => {
+            json!({"t": "boolean[]", "v": a.iter().map(|x| b(*x)).collect::<Vec<_>>()})
+        }
+        Value::DoubleArray(a) => {
+            json!({"t": "double[]", "v": a.iter().map(|x| bits64(*x)).collect::<Vec<_>>()})
+        }
+        Value::IntArray(a) => {
+            json!({"t": "int[]", "v": a.iter().map(i64::to_string).collect::<Vec<_>>()})
+        }
+        Value::FloatArray(a) => {
+            json!({"t": "float[]", "v": a.iter().map(|x| bits32(*x)).collect::<Vec<_>>()})
+        }
+        Value::StringArray(a) => {
+            json!({"t": "string[]", "v": a.iter().map(|x| hex(x.as_bytes())).collect::<Vec<_>>()})
+        }
     }
 }
 
@@ -521,10 +552,13 @@ pub fn shrink(target: Target, input: &[u8], signature: &str, budget: usize) -> V
 pub fn drive_client_core(target: Target, input: &[u8]) {
     use nt4_core::{ClientCore, ProtocolVersion};
     let mut core = ClientCore::new();
-    let _ = core.subscribe(vec![String::new()], nt4_proto::SubscriptionOptions {
-        prefix: true,
-        ..Default::default()
-    });
+    let _ = core.subscribe(
+        vec![String::new()],
+        nt4_proto::SubscriptionOptions {
+            prefix: true,
+            ..Default::default()
+        },
+    );
     core.connect(1_000, ProtocolVersion::V4_1);
     let mut reply = Vec::new();
     encode_binary(
@@ -574,7 +608,7 @@ mod oracle {
         unsafe { nt4_oracle_free(p) };
         let mut de = serde_json::Deserializer::from_str(&s);
         de.disable_recursion_limit();
-        let j = serde::Deserialize::deserialize(&mut de).expect("oracle writes JSON");
+        let j = serde_json::Value::deserialize(&mut de).expect("oracle writes JSON");
         super::normalize(j)
     }
 
