@@ -10,7 +10,8 @@ MessagePack binary frames for values. The protocol is described in
 
 ## Status
 
-Milestone 3 of 6: the client is usable. The server comes next.
+Milestone 3 of 6: the client is usable. The server comes next. Current state
+and next steps are in [docs/STATUS.md](docs/STATUS.md).
 
 | Crate | What it does | Status |
 | --- | --- | --- |
