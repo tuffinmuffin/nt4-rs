@@ -201,3 +201,67 @@ async fn dropping_the_server_closes_connections() {
     drop(server);
     eventually(|| (!c.is_connected()).then_some(())).await;
 }
+
+/// Send `request` over plain TCP and return the whole response.
+async fn http(server: &Server, request: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut tcp = tokio::net::TcpStream::connect(server.local_addr())
+        .await
+        .unwrap();
+    // Two writes, so the request head arrives in pieces.
+    let (a, b) = request.split_at(request.len() / 2);
+    tcp.write_all(a.as_bytes()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    tcp.write_all(b.as_bytes()).await.unwrap();
+    let mut out = String::new();
+    tokio::time::timeout(Duration::from_secs(5), tcp.read_to_string(&mut out))
+        .await
+        .unwrap()
+        .unwrap();
+    out
+}
+
+// Plain HTTP is answered as ntcore's ServerConnection4::ProcessRequest does
+// (AdvantageScope checks the server this way before opening its WebSocket).
+#[tokio::test(flavor = "multi_thread")]
+async fn plain_http_is_answered_like_ntcore() {
+    let server = server().await;
+    let root = http(&server, "GET / HTTP/1.1\r\nHost: x\r\n\r\n").await;
+    assert!(root.starts_with("HTTP/1.1 200 OK\r\n"), "{root}");
+    assert!(root.contains("Content-Type: text/html\r\n"), "{root}");
+    assert!(
+        root.contains("Access-Control-Allow-Origin: *\r\n"),
+        "{root}"
+    );
+    assert!(
+        root.ends_with("<body><p>WebSockets must be used to access NetworkTables.</body></html>"),
+        "{root}"
+    );
+
+    let query = http(&server, "GET /?x=1 HTTP/1.0\r\n\r\n").await;
+    assert!(query.starts_with("HTTP/1.0 200 OK\r\n"), "{query}");
+
+    let persistent = http(&server, "GET /nt/persistent.json HTTP/1.1\r\n\r\n").await;
+    assert!(
+        persistent.starts_with("HTTP/1.1 200 OK\r\n"),
+        "{persistent}"
+    );
+    assert!(persistent.contains("Content-Type: application/json\r\n"));
+    assert!(persistent.trim_end().ends_with(']'), "{persistent}");
+
+    let missing = http(&server, "GET /nope HTTP/1.1\r\n\r\n").await;
+    assert!(
+        missing.starts_with("HTTP/1.1 404 Not Found\r\n"),
+        "{missing}"
+    );
+    assert!(missing.ends_with("404: Not Found!\r\nResource not found"));
+
+    // HEAD gets ntcore's answer (a 404) without the body.
+    let head = http(&server, "HEAD / HTTP/1.1\r\n\r\n").await;
+    assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"), "{head}");
+    assert!(head.ends_with("\r\n\r\n"), "{head}");
+
+    // The server still takes WebSocket clients afterwards.
+    let c = client(&server, "after-http");
+    eventually(|| c.is_connected().then_some(())).await;
+}
