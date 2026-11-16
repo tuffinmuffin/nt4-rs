@@ -38,7 +38,9 @@ pub use text::{
     decode_client_text, decode_server_text, encode_text_frame,
 };
 pub use types::NtType;
-pub use value::{BinaryError, BinaryMessage, BinaryReader, Value, encode_binary};
+pub use value::{
+    BinaryError, BinaryMessage, BinaryReader, Value, encode_binary, encode_binary_parts,
+};
 
 /// WebSocket subprotocol for NT 4.1, tried first.
 pub const SUBPROTOCOL_V4_1: &str = "v4.1.networktables.first.wpi.edu";

@@ -258,8 +258,17 @@ more than 10% more instructions gives a warning; more than 50% fails the job. Co
 the runner is, so a failure means the code does more work. See
 `crates/nt4-perf/README.md` for the numbers and how to run it locally.
 
-One thing it shows: `ClientCore` spends about 8,300 instructions per value
-when publishing, against about 1,300 when receiving. That may be worth a look.
+One thing it showed: `ClientCore` spent about 8,300 instructions per value
+when publishing, against about 1,300 when receiving. Fixed on
+`claude/publish-perf`: the client copied the topic name on every set, the
+outgoing queue cloned each value and encoded it into a new buffer (now
+`nt4_proto::encode_binary_parts` into a reused one), the server collected
+its target clients into a list for every relayed value, and the queue's id
+map used SipHash. Measured on a Mac, a steady publish loop went from 33 to
+17 ns per value and a relay through `ServerCore` from 70 to 39 ns; allocations
+per published value from 4.3 to 0.2. `client_publish` measures a new
+client's first loop, which creates every topic's bookkeeping; a steady-state
+benchmark would track a running robot better.
 
 The `bench/` load benchmark against pyntcore stays a manual tool and is not
 run in CI. nt4 is meant for hosts and coprocessors, so the instruction-count

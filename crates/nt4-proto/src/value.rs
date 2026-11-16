@@ -140,13 +140,29 @@ pub enum BinaryError {
 /// and doubles always `float 64`, the same as ntcore. Several messages may be
 /// appended to the same buffer to send them in one frame.
 pub fn encode_binary(out: &mut Vec<u8>, msg: &BinaryMessage) {
+    encode_binary_parts(out, msg.id, msg.timestamp_us, &msg.value);
+}
+
+/// [`encode_binary`] from the parts of a message, so a caller that holds a
+/// borrowed value doesn't have to clone it into a [`BinaryMessage`].
+///
+/// ```
+/// use nt4_proto::{BinaryMessage, Value, encode_binary, encode_binary_parts};
+/// let value = Value::DoubleArray(vec![1.0, 2.0]);
+/// let mut a = Vec::new();
+/// encode_binary_parts(&mut a, 3, 1_000, &value);
+/// let mut b = Vec::new();
+/// encode_binary(&mut b, &BinaryMessage { id: 3, timestamp_us: 1_000, value });
+/// assert_eq!(a, b);
+/// ```
+pub fn encode_binary_parts(out: &mut Vec<u8>, id: i32, timestamp_us: i64, value: &Value) {
     use rmp::encode as e;
     // Writing to a Vec cannot fail, so the results are ignored.
     let _ = e::write_array_len(out, 4);
-    let _ = e::write_sint(out, i64::from(msg.id));
-    let _ = e::write_sint(out, msg.timestamp_us);
-    let _ = e::write_uint(out, u64::from(msg.value.type_id()));
-    match &msg.value {
+    let _ = e::write_sint(out, i64::from(id));
+    let _ = e::write_sint(out, timestamp_us);
+    let _ = e::write_uint(out, u64::from(value.type_id()));
+    match value {
         Value::Boolean(b) => e::write_bool(out, *b).unwrap_or(()),
         Value::Double(d) => e::write_f64(out, *d).unwrap_or(()),
         Value::Int(i) => {

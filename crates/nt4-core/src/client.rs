@@ -421,8 +421,14 @@ impl ClientCore {
             conn.outgoing
                 .send_value(&mut self.wire, id.0, time_us, &value, mode);
         }
-        self.last_values
-            .insert(publisher.name.clone(), (time_us, value));
+        // Look up before inserting, so the name is only copied the first time.
+        match self.last_values.get_mut(&publisher.name) {
+            Some(last) => *last = (time_us, value),
+            None => {
+                self.last_values
+                    .insert(publisher.name.clone(), (time_us, value));
+            }
+        }
         Ok(())
     }
 

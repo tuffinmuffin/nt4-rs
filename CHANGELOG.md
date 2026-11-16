@@ -40,5 +40,11 @@ First release.
   `NtStruct::type_name()` and `schema()` are functions (they were the
   constants `TYPE_NAME` and `SCHEMA`), so generic struct types can be
   written.
+- Publishing a value costs about half what it did (17 against 33 ns per
+  value in a steady loop), and relaying one through the server about 40%
+  less: no per-value copy of the topic name, value or encode buffer, no
+  per-value target list on the server, and a cheaper hash for queue ids.
+  `nt4_proto::encode_binary_parts` encodes a value message from borrowed
+  parts.
 - ntcore 2027 only: the interop tests, the fuzzer oracle and the benchmark
   use pyntcore 2027.0.0a8. ntcore 2026 behavior is not tracked.
