@@ -21,7 +21,7 @@ server = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
 [dependencies]
 nt4-proto = { path = "../nt4-proto", version = "0.1.0" }
 nt4-core = { path = "../nt4-core", version = "0.1.0" }
-tokio = { version = "1.47", features = ["rt", "net", "time", "sync", "macros"], optional = true }
+tokio = { version = "1.47", features = ["rt", "net", "time", "sync", "macros", "io-util"], optional = true }
 tokio-tungstenite = { version = "0.30", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"], optional = true }
 

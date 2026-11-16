@@ -557,3 +557,48 @@ async fn ntcore_client_reads_server_structs_and_schemas() {
         assert_eq!(props["properties"], json!({"retained": true}), "{name}");
     }
 }
+
+/// Send `request` to `port` over plain TCP and return the whole response,
+/// retrying the connect for up to 5 s while a server starts.
+async fn http_get(port: u16, request: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut tcp = None;
+    for _ in 0..500 {
+        if let Ok(t) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+            tcp = Some(t);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let mut tcp = tcp.expect("server did not start");
+    tcp.write_all(request.as_bytes()).await.unwrap();
+    let mut out = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), tcp.read_to_end(&mut out))
+        .await
+        .expect("server did not close")
+        .unwrap();
+    String::from_utf8(out).unwrap()
+}
+
+// Plain HTTP (AdvantageScope checks `GET /` before opening its WebSocket)
+// gets the same bytes from our server as from an ntcore server. HTTP/1.0,
+// so ntcore closes after one response as we always do.
+#[tokio::test(flavor = "multi_thread")]
+async fn plain_http_matches_ntcore() {
+    let Some(mut peer) = Peer::spawn().await else {
+        return;
+    };
+    peer.start_server().await;
+    let ours = server().await;
+    for request in [
+        "GET / HTTP/1.0\r\n\r\n",
+        "GET /?probe=1 HTTP/1.0\r\nHost: x\r\n\r\n",
+        "GET /nt/persistent.json HTTP/1.0\r\n\r\n",
+        "GET /nope HTTP/1.0\r\n\r\n",
+        "POST / HTTP/1.0\r\nContent-Length: 0\r\n\r\n",
+    ] {
+        let theirs = http_get(peer.port4, request).await;
+        let mine = http_get(ours.local_addr().port(), request).await;
+        assert_eq!(mine, theirs, "{request:?}");
+    }
+}

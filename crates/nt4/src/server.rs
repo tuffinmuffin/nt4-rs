@@ -25,7 +25,9 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -37,6 +39,7 @@ use nt4_proto::{
     BinaryMessage, BinaryReader, NtType, Properties, RTT_ID, SUBPROTOCOL_RTT, SUBPROTOCOL_V4_0,
     SUBPROTOCOL_V4_1, SubscriptionOptions, Value, encode_binary,
 };
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::Instant;
@@ -709,12 +712,204 @@ fn is_local(addr: &SocketAddr) -> bool {
     }
 }
 
+// ----- Plain HTTP -----
+
+/// Largest HTTP request head read before giving up on a connection.
+const MAX_REQUEST_HEAD: usize = 8 * 1024;
+
+/// Read up to the end of the request head (the blank line). `None` if the
+/// peer closes first or the head is too long.
+async fn read_head(tcp: &mut TcpStream) -> Option<Vec<u8>> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    loop {
+        let n = tcp.read(&mut chunk).await.ok()?;
+        if n == 0 {
+            return None;
+        }
+        let searched = buf.len().saturating_sub(3);
+        buf.extend_from_slice(&chunk[..n]);
+        if buf[searched..].windows(4).any(|w| w == b"\r\n\r\n") {
+            return Some(buf);
+        }
+        if buf.len() > MAX_REQUEST_HEAD {
+            return None;
+        }
+    }
+}
+
+/// A parsed request line, plus whether the headers ask for a WebSocket.
+struct HttpRequest<'a> {
+    method: &'a str,
+    target: &'a str,
+    version: &'a str,
+    upgrade: bool,
+}
+
+fn parse_head(head: &[u8]) -> Option<HttpRequest<'_>> {
+    let text = std::str::from_utf8(head).ok()?;
+    let mut lines = text.split("\r\n");
+    let mut parts = lines.next()?.split(' ');
+    let (method, target, version) = (parts.next()?, parts.next()?, parts.next()?);
+    let version = version.strip_prefix("HTTP/")?;
+    if parts.next().is_some() || version.len() != 3 {
+        return None;
+    }
+    // wpinet's HttpWebSocketServerConnection takes the WebSocket path when
+    // there's an `Upgrade: websocket` header; everything else is plain HTTP.
+    let upgrade = lines.take_while(|l| !l.is_empty()).any(|l| {
+        l.split_once(':').is_some_and(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("upgrade")
+                && value.trim().eq_ignore_ascii_case("websocket")
+        })
+    });
+    Some(HttpRequest {
+        method,
+        target,
+        version,
+        upgrade,
+    })
+}
+
+/// Answer a plain HTTP request as ntcore's `ServerConnection4::ProcessRequest`
+/// does: a short page at `/`, the persistent values at `/nt/persistent.json`,
+/// and 404 for anything else. AdvantageScope fetches `/` and only opens its
+/// WebSocket once that answers, so this is needed, not a nicety.
+fn http_response(shared: &Shared, req: &HttpRequest) -> Vec<u8> {
+    let path = req
+        .target
+        .strip_prefix("http://")
+        .map(|rest| rest.find('/').map_or("/", |i| &rest[i..]))
+        .unwrap_or(req.target);
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    let get = req.method == "GET";
+    let (code, reason, content_type, body) = if !path.starts_with('/') {
+        // ntcore's 400 page says "400: Not Found!"; say what it is.
+        (
+            400,
+            "Bad Request",
+            "text/plain",
+            "400: Bad Request!\r\n".to_string(),
+        )
+    } else if get && path == "/" {
+        (
+            200,
+            "OK",
+            "text/html",
+            "<html><head><title>NetworkTables</title></head>\
+             <body><p>WebSockets must be used to access NetworkTables.\
+             </body></html>"
+                .to_string(),
+        )
+    } else if get && path == "/nt/persistent.json" {
+        (
+            200,
+            "OK",
+            "application/json",
+            shared.lock().core.dump_persistent(),
+        )
+    } else {
+        (
+            404,
+            "Not Found",
+            "text/plain",
+            "404: Not Found!\r\nResource not found".to_string(),
+        )
+    };
+    // wpinet's headers, except that we always close after one response
+    // (wpinet keeps HTTP/1.1 connections open for more requests; nobody
+    // needs that here).
+    let mut out = format!(
+        "HTTP/{} {code} {reason}\r\n\
+         Connection: close\r\n\
+         Server: WebServer/1.0\r\n\
+         Cache-Control: no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0\r\n\
+         Pragma: no-cache\r\n\
+         Expires: Mon, 3 Jan 2000 12:34:56 GMT\r\n\
+         Content-Type: {content_type}\r\n\
+         Content-Length: {}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Methods: *\r\n\
+         \r\n",
+        req.version,
+        body.len()
+    )
+    .into_bytes();
+    // ntcore sends the body for HEAD too, which HTTP forbids; leave it off.
+    if req.method != "HEAD" {
+        out.extend_from_slice(body.as_bytes());
+    }
+    out
+}
+
+/// The TCP stream with the request head we already read put back in front,
+/// so tungstenite can do the WebSocket handshake from the start.
+struct Prefixed {
+    head: Vec<u8>,
+    pos: usize,
+    tcp: TcpStream,
+}
+
+impl AsyncRead for Prefixed {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = &mut *self;
+        if this.pos < this.head.len() {
+            let n = buf.remaining().min(this.head.len() - this.pos);
+            buf.put_slice(&this.head[this.pos..this.pos + n]);
+            this.pos += n;
+            if this.pos == this.head.len() {
+                this.head = Vec::new();
+                this.pos = 0;
+            }
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut this.tcp).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Prefixed {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        data: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.tcp).poll_write(cx, data)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.tcp).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.tcp).poll_shutdown(cx)
+    }
+}
+
 async fn connection(
     shared: Arc<Shared>,
-    tcp: TcpStream,
+    mut tcp: TcpStream,
     addr: SocketAddr,
     stop: watch::Receiver<bool>,
 ) {
+    let Some(head) = read_head(&mut tcp).await else {
+        return;
+    };
+    match parse_head(&head) {
+        // Unparseable: wpinet just closes the connection.
+        None => return,
+        Some(req) if !req.upgrade => {
+            let response = http_response(&shared, &req);
+            let _ = tcp.write_all(&response).await;
+            let _ = tcp.shutdown().await;
+            return;
+        }
+        Some(_) => {}
+    }
+    let tcp = Prefixed { head, pos: 0, tcp };
     let mut kind = None;
     // tungstenite fixes this callback's error type.
     #[allow(clippy::result_large_err)]
@@ -747,7 +942,7 @@ async fn connection(
     }
 }
 
-type Ws = WebSocketStream<TcpStream>;
+type Ws = WebSocketStream<Prefixed>;
 
 /// Answer RTT pings until the connection closes.
 async fn run_rtt(shared: &Shared, ws: Ws, mut stop: watch::Receiver<bool>) {

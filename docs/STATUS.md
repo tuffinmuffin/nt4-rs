@@ -1,7 +1,7 @@
 # Project status
 
 Where nt4-rs stands, so work can be picked up from any machine. Last updated
-2026-11-15. The full plan is in the
+2026-11-16. The full plan is in the
 [project plan doc](https://claude.ai/artifact/R1JvYBZZYPm6HuUuFM9QPh).
 
 ## Milestones
@@ -13,7 +13,7 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 | 3 | `nt4`: tokio `Client`, typed publishers and subscribers, pyntcore interop tests, load benchmark, decoder fuzzer, crates.io readiness | Merged (PRs #3 to #7) |
 | 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | Merged (PR #8) |
 | 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | Merged (PR #9) |
-| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code in review (branch `claude/release-prep`); release not started |
+| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); release not started |
 
 ## Milestone 4: `ServerCore`
 
@@ -264,24 +264,41 @@ check is enough.
 
 ## Next steps
 
-1. **Review and merge the struct PR** (`claude/release-prep`).
-2. **Manual checks** with AdvantageScope and Elastic against the `server`
-   example (it publishes a `Pose2d` at `/server/pose`) and the
-   `struct_topic` example.
-3. **Release.** Decide on crates.io (the plan's open question), then tag
+1. **Manual checks** with AdvantageScope and Elastic against the `server`
+   example. Done 2026-11-16 on Windows, localhost: both connect and show
+   the topics, and AdvantageScope draws `/server/pose` (`struct:Pose2d`)
+   driving its circle on the field. AdvantageScope first needed the server
+   to answer plain HTTP as ntcore does (it checks `GET /` before opening
+   its WebSocket; fixed, and `plain_http_matches_ntcore` in
+   `crates/nt4/tests/interop_server.rs` checks the answers against
+   ntcore's byte for byte). Not checked: the struct array view (run
+   the `struct_topic` example against the server for
+   `struct:SwerveModuleVelocity[]`), Elastic's Field widget, and a robot
+   on a real network.
+2. **Release.** Decide on crates.io (the plan's open question), then tag
    and publish `nt4-proto`, `nt4-core` and `nt4` in that order.
-4. **Report the ntcore bugs to allwpilib** (`main`): the two parser bugs
+3. **Report the ntcore bugs to allwpilib** (side todo, tracked
+   separately; notes in `docs/UPSTREAM_BUGS.md`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale
    announce flag), the Windows persistent-file bug, and the
    `std::array` struct schema.
-5. **Look at nt4's cost per frame** on localhost and per published value
+4. **Look at nt4's cost per frame** on localhost and per published value
    (see the benchmark notes below).
+5. **A crate of common WPILib data types** (future). Move `nt4::wpimath`
+   out of `nt4` into its own crate (e.g. `nt4-wpimath`) built only on the
+   public `NtStruct` / `NtProtobuf` traits, so `nt4` stays a general NT
+   library and the types follow WPILib's yearly renames on their own
+   version. Pull in more of wpimath's structs while at it (kinematics,
+   controllers, trajectory samples, shapes; see wpimath's `*/struct/`
+   folders), one file per group, each schema checked against wpimath's
+   `*Struct.hpp`. Core doc examples and tests switch to small hand-written
+   structs; the pose interop tests and the `struct_topic` / `server`
+   examples move to the new crate. Do it before publishing to crates.io.
 
 ## Picking this up locally
 
 ```bash
 git clone https://github.com/tuffinmuffin/nt4-rs && cd nt4-rs
-git switch claude/release-prep   # milestone 6 structs, until it merges
 cargo test --workspace
 ```
 
