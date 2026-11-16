@@ -183,7 +183,7 @@ jobs:
       pull-requests: write
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      COV_ARGS: -p nt4-proto -p nt4-core -p nt4 --all-features --ignore-filename-regex (tests|examples|benches)/
+      COV_ARGS: -p nt4-proto -p nt4-core -p nt4 -p nt4-wpimath --all-features --ignore-filename-regex (tests|examples|benches)/
     steps:
       - uses: actions/checkout@v4
         with:

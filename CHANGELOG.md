@@ -34,5 +34,11 @@ First release.
   rejected, as in ntcore. It also found an ntcore parser bug (a `null` member
   after a repeated key takes the repeated key's value), which nt4 does not
   copy.
+- `nt4-wpimath`: WPILib's geometry and kinematics struct types, split out
+  of `nt4` (where they were `nt4::wpimath`) so `nt4` stays a general
+  NetworkTables library and the types can follow WPILib's yearly renames.
+  `NtStruct::type_name()` and `schema()` are functions (they were the
+  constants `TYPE_NAME` and `SCHEMA`), so generic struct types can be
+  written.
 - ntcore 2027 only: the interop tests, the fuzzer oracle and the benchmark
   use pyntcore 2027.0.0a8. ntcore 2026 behavior is not tracked.

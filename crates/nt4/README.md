@@ -6,6 +6,8 @@ the simulator, and anything else that runs WPILib's ntcore, the same way
 AdvantageScope or Elastic do. The server (`server` feature) is what those
 connect to, as robot code's ntcore server is.
 
+Unofficial: not affiliated with or endorsed by WPILib or FIRST.
+
 - Connects by team number or address, keeps the connection alive, and
   reconnects on its own
 - Typed publishers and subscribers for every NT4 value type
@@ -80,18 +82,23 @@ warnings about what clients send.
 | `Vec<u8>` | `raw` |
 | `Vec<bool>`, `Vec<f64>`, `Vec<i64>`, `Vec<f32>`, `Vec<String>` | `boolean[]`, `double[]`, `int[]`, `float[]`, `string[]` |
 
-Structs are typed too. `nt4::wpimath` has WPILib's geometry and kinematics
-types (`Pose2d`, `Pose3d`, `SwerveModuleVelocity`, ...), and your own types
-implement `NtStruct`. Publishing one also publishes its schema under
+Structs are typed too. The [`nt4-wpimath`](https://docs.rs/nt4-wpimath)
+crate has WPILib's geometry and kinematics types (`Pose2d`, `Pose3d`,
+`SwerveModuleVelocity`, ...), and your own types implement `NtStruct` (see
+`nt4::structs`). Publishing one also publishes its schema under
 `/.schema/`, as ntcore does, so AdvantageScope and Elastic can decode it:
 
-```rust,no_run
-# async fn demo(client: nt4::Client) {
-use nt4::wpimath::{Pose2d, SwerveModuleVelocity};
+```toml
+[dependencies]
+nt4 = "0.1"
+nt4-wpimath = "0.1"
+```
+
+```rust,ignore
+use nt4_wpimath::{Pose2d, SwerveModuleVelocity};
 let pose = client.publish::<Pose2d>("/vision/pose", Default::default());
 let modules = client.publish::<Vec<SwerveModuleVelocity>>("/drive/modules", Default::default());
 pose.set(Pose2d::default());
-# }
 ```
 
 Protobuf messages implement `NtProtobuf` and publish as `Proto<T>`. To
@@ -114,7 +121,7 @@ with `pip install pyntcore`), then:
 | `cargo run -p nt4 --example sync_loop -- 127.0.0.1` | uses the client from a plain (non-async) 50 Hz loop, the way robot code uses ntcore |
 | `cargo run -p nt4 --example watch -- 127.0.0.1 /` | prints every topic and value under a prefix; pass a team number instead of a host to find a robot |
 | `cargo run -p nt4 --example publish -- 127.0.0.1` | publishes a counter and a sine wave, and reads a gain other clients can set |
-| `cargo run -p nt4 --example struct_topic -- 127.0.0.1` | publishes a `Pose2d` and swerve module states, with their schemas |
+| `cargo run -p nt4-wpimath --example struct_topic -- 127.0.0.1` | publishes a `Pose2d` and swerve module states, with their schemas (in the `nt4-wpimath` crate) |
 | `cargo run -p nt4 --features server --example server` | runs a server on 5810 with a few topics; point AdvantageScope, Elastic or the other examples at it |
 
 ## How it fits together

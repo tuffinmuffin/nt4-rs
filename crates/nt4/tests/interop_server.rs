@@ -20,7 +20,10 @@ use serde_json::{Value as Json, json};
 
 #[path = "interop/peer.rs"]
 mod peer;
+#[path = "support/wpi_types.rs"]
+mod wpi_types;
 use peer::{Peer, eventually};
+use wpi_types::{Rotation2d, SwerveModuleVelocity};
 
 async fn server() -> Server {
     Server::start(ServerConfig {
@@ -522,7 +525,6 @@ async fn persistent_file_matches_ntcore_byte_for_byte() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ntcore_client_reads_server_structs_and_schemas() {
-    use nt4::wpimath::{Rotation2d, SwerveModuleVelocity};
     let server = server().await;
     let modules: Vec<_> = (0..4)
         .map(|i| SwerveModuleVelocity {

@@ -4,6 +4,8 @@ The [NetworkTables 4.1](https://github.com/wpilibsuite/allwpilib/blob/main/ntcor
 wire format for Rust, with no I/O: JSON control messages in WebSocket text
 frames and MessagePack value updates in binary frames.
 
+Unofficial: not affiliated with or endorsed by WPILib or FIRST.
+
 Most programs want the [`nt4`](https://docs.rs/nt4) client crate. This one is
 for building your own client, server or tooling on the raw messages.
 

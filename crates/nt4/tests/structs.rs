@@ -15,15 +15,19 @@
 
 #![cfg(all(feature = "server", feature = "client"))]
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use nt4::proto::structs::{DynamicStruct, StructDatabase};
 use nt4::structs::{NtProtobuf, NtStruct, Proto, StructField, StructReader};
-use nt4::wpimath::{Pose2d, Rotation2d, Translation2d};
 use nt4::{
     Client, ClientConfig, Event, NtType, NtValue, Properties, PublishOptions, Server, ServerConfig,
     SubscriptionOptions, Value,
 };
+
+#[path = "support/wpi_types.rs"]
+mod wpi_types;
+use wpi_types::{Pose2d, Rotation2d, Translation2d};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct Inner {
@@ -32,9 +36,13 @@ struct Inner {
 }
 
 impl NtStruct for Inner {
-    const TYPE_NAME: &'static str = "Inner";
     const SIZE: usize = 8;
-    const SCHEMA: &'static str = "int32 a; int32 b";
+    fn type_name() -> Cow<'static, str> {
+        "Inner".into()
+    }
+    fn schema() -> Cow<'static, str> {
+        "int32 a; int32 b".into()
+    }
     fn pack(&self, out: &mut Vec<u8>) {
         self.a.pack(out);
         self.b.pack(out);
@@ -55,9 +63,13 @@ struct Outer {
 }
 
 impl NtStruct for Outer {
-    const TYPE_NAME: &'static str = "Outer";
     const SIZE: usize = <Inner as NtStruct>::SIZE + 4;
-    const SCHEMA: &'static str = "Inner inner; int32 c";
+    fn type_name() -> Cow<'static, str> {
+        "Outer".into()
+    }
+    fn schema() -> Cow<'static, str> {
+        "Inner inner; int32 c".into()
+    }
     fn pack(&self, out: &mut Vec<u8>) {
         StructField::pack(&self.inner, out);
         self.c.pack(out);
@@ -80,9 +92,13 @@ struct ThingA {
 }
 
 impl NtStruct for ThingA {
-    const TYPE_NAME: &'static str = "ThingA";
     const SIZE: usize = 1;
-    const SCHEMA: &'static str = "uint8 value";
+    fn type_name() -> Cow<'static, str> {
+        "ThingA".into()
+    }
+    fn schema() -> Cow<'static, str> {
+        "uint8 value".into()
+    }
     fn pack(&self, out: &mut Vec<u8>) {
         out.push(self.x);
     }

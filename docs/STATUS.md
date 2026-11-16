@@ -115,15 +115,18 @@ such a file fails to load in nt4.
 
 ## Milestone 6: structs, protobuf and schemas
 
-Typed struct topics (`nt4::structs`, `nt4::wpimath`):
+Typed struct topics (`nt4::structs`, and the `nt4-wpimath` crate):
 
 - `NtStruct` is wpiutil's `Struct<T>`: a type name, a packed size, a schema
-  string, pack and unpack. Any `T: NtStruct` is an `NtValue`, so
+  string, pack and unpack. The name and schema are functions returning
+  `Cow<'static, str>`, so generic types such as `Matrix__<r>_<c>` can
+  build them; they're called only when publishing or subscribing. Any `T: NtStruct` is an `NtValue`, so
   `publish::<T>` / `subscribe::<T>` work for `T` (`struct:<Name>`) and
   `Vec<T>` (`struct:<Name>[]`). `StructField` and `StructReader` make the
   pack and unpack code short, and `structs::check::<T>()` tests a hand
   implementation against its own schema.
-- `nt4::wpimath` has WPILib 2027's geometry and kinematics structs
+- `nt4-wpimath` (its own crate since the split; it was `nt4::wpimath`)
+  has WPILib 2027's geometry and kinematics structs
   (`Translation2d` to `Twist3d`, `ChassisVelocities`,
   `SwerveModulePosition`, `SwerveModuleVelocity`), with the same names,
   schemas and nested-schema order as wpimath's `*Struct.hpp`.
@@ -275,25 +278,47 @@ check is enough.
    the `struct_topic` example against the server for
    `struct:SwerveModuleVelocity[]`), Elastic's Field widget, and a robot
    on a real network.
-2. **Release.** Decide on crates.io (the plan's open question), then tag
-   and publish `nt4-proto`, `nt4-core` and `nt4` in that order.
+2. **Release prep, in this order** (decided 2026-11-16: publish to
+   crates.io as `nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath`, the names
+   they have now, each marked unofficial in its description and README):
+   1. Done: `NtStruct`'s name and schema are functions, so generic types
+      can implement it.
+   2. Done: `nt4::wpimath` is now the `nt4-wpimath` crate. nt4's doc
+      examples use a small hand-written struct, its tests use test copies
+      of four WPILib types (`tests/support/wpi_types.rs`), and the
+      `struct_topic` example moved to `nt4-wpimath`. The `server` example
+      no longer publishes a pose; run `struct_topic` against it for
+      AdvantageScope's field view.
+   3. A schema audit next to `scripts/upstream_audit.py`: pull every
+      `GetTypeName()` / `GetSchema()` from wpimath's `*Struct.hpp` (plus
+      Java-only ones such as HAL's `ControlWord`) at `ALLWPILIB_COMMIT`,
+      compare with what nt4-wpimath's types report, and fail on a schema
+      that differs, an upstream type that is missing and not listed as not
+      applicable, or one of ours upstream no longer has.
+   4. The rest of wpimath's structs, one file per group: kinematics
+      (`ChassisAccelerations`, `SwerveModuleAcceleration`, differential and
+      mecanum wheel positions, velocities and accelerations, the
+      kinematics structs), shapes (`Rectangle2d`, `Ellipse2d`),
+      trajectory samples (`HolonomicSample`, `DifferentialSample`),
+      controllers (the four feedforwards, `DifferentialDriveWheelVoltages`),
+      splines, `DCMotor`; then the generic ones (`Matrix__R_C`,
+      `Vector__N`, `SwerveDriveKinematics__N`, `LinearSystem__S_I_O`), the
+      three `TrapezoidProfileConstraints` names, and `ControlWord` (bit
+      fields and an enum).
+   5. A weekly CI job that runs both audits against allwpilib's newest
+      release and opens an issue when something changed.
+   6. Publish-path performance (item 4 below).
+   7. `cargo publish --workspace --dry-run`, then publish, then tag.
+   Later: `#[derive(NtStruct)]` in an `nt4-derive` crate, like Java's
+   `StructGenerator.genRecord`.
 3. **Report the ntcore bugs to allwpilib** (side todo, tracked
    separately; notes in `docs/UPSTREAM_BUGS.md`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale
    announce flag), the Windows persistent-file bug, and the
    `std::array` struct schema.
 4. **Look at nt4's cost per frame** on localhost and per published value
-   (see the benchmark notes below).
-5. **A crate of common WPILib data types** (future). Move `nt4::wpimath`
-   out of `nt4` into its own crate (e.g. `nt4-wpimath`) built only on the
-   public `NtStruct` / `NtProtobuf` traits, so `nt4` stays a general NT
-   library and the types follow WPILib's yearly renames on their own
-   version. Pull in more of wpimath's structs while at it (kinematics,
-   controllers, trajectory samples, shapes; see wpimath's `*/struct/`
-   folders), one file per group, each schema checked against wpimath's
-   `*Struct.hpp`. Core doc examples and tests switch to small hand-written
-   structs; the pose interop tests and the `struct_topic` / `server`
-   examples move to the new crate. Do it before publishing to crates.io.
+   (see the benchmark notes below). No CI `perf` warning has fired (PRs
+   #8 to #11); this is the gap against ntcore, not a regression.
 
 ## Picking this up locally
 

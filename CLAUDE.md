@@ -37,9 +37,11 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
 - Structs: `nt4_proto::structs` parses schemas and decodes values at run
   time (port of wpiutil's `SchemaParser` / `DynamicStruct`; tests in
   `nt4-proto/tests/struct_schema.rs` and `dynamic_struct.rs`). `nt4::structs`
-  has the typed `NtStruct` / `NtProtobuf` traits and schema registration;
-  `nt4::wpimath` the WPILib types, whose schemas must match wpimath's
-  `*Struct.hpp` exactly.
+  has the typed `NtStruct` / `NtProtobuf` traits and schema registration.
+- `crates/nt4-wpimath`: the WPILib types, built only on `nt4`'s public
+  traits. Their schemas must match wpimath's `*Struct.hpp` exactly. nt4's
+  own tests use the copies in `nt4/tests/support/wpi_types.rs` instead
+  (nt4 can't depend on nt4-wpimath).
 
 ## Rules
 

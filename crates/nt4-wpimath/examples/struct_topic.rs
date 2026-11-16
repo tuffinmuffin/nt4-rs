@@ -2,7 +2,7 @@
 //! AdvantageScope and Elastic decode.
 //!
 //! ```text
-//! cargo run -p nt4 --example struct_topic -- 127.0.0.1
+//! cargo run -p nt4-wpimath --example struct_topic -- 127.0.0.1
 //! ```
 //!
 //! A struct topic has type `struct:<Name>` and carries the fields packed
@@ -12,8 +12,8 @@
 
 use std::time::Duration;
 
-use nt4::wpimath::{Pose2d, Rotation2d, SwerveModuleVelocity, Translation2d};
 use nt4::{Client, ClientConfig, PublishOptions};
+use nt4_wpimath::{Pose2d, Rotation2d, SwerveModuleVelocity, Translation2d};
 
 #[tokio::main]
 async fn main() {

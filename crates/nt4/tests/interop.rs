@@ -17,7 +17,10 @@ use serde_json::json;
 
 #[path = "interop/peer.rs"]
 mod peer;
+#[path = "support/wpi_types.rs"]
+mod wpi_types;
 use peer::{Peer, eventually};
+use wpi_types::{Pose2d, Rotation2d, Translation2d};
 
 /// A peer running an ntcore server, or `None` if `NT4_INTEROP_PYTHON` isn't
 /// set.
@@ -208,7 +211,6 @@ fn bytes_json<T: nt4::NtValue>(value: T) -> serde_json::Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn struct_topics_and_schemas_match_ntcore() {
-    use nt4::wpimath::{Pose2d, Rotation2d, Translation2d};
     let Some(mut peer) = server_peer().await else {
         return;
     };
@@ -254,7 +256,6 @@ async fn struct_topics_and_schemas_match_ntcore() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reads_ntcore_structs_typed_and_by_schema() {
     use nt4::proto::structs::{DynamicStruct, StructDatabase};
-    use nt4::wpimath::Translation2d;
     let Some(mut peer) = server_peer().await else {
         return;
     };
