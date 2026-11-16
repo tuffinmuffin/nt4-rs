@@ -11,6 +11,8 @@
 //!   [`decode_client_text`] / [`decode_server_text`] to read a text frame.
 //! - [`Value`] and [`BinaryMessage`]: value updates, with
 //!   [`encode_binary`] and [`BinaryReader`] for binary frames.
+//! - [`structs`]: WPILib struct schemas, to decode `struct:` values whose
+//!   type is only known at run time.
 //!
 //! Encoding matches ntcore byte for byte, and decoding accepts and rejects
 //! the same input with the same warning text. The tests in `tests/` are
@@ -26,6 +28,7 @@
 //! assert_eq!(decoded.messages, vec![ClientMessage::Unsubscribe { subuid: 5 }]);
 //! ```
 
+pub mod structs;
 pub mod text;
 pub mod types;
 pub mod value;

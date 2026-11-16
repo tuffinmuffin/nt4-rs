@@ -12,8 +12,8 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 | 2 | `nt4-core`: sans-I/O `ClientCore`, `TimeSync`, `OutgoingQueue`; `NetworkOutgoingQueueTest` and client `TimeSyncTest` cases ported | Merged (PR #2) |
 | 3 | `nt4`: tokio `Client`, typed publishers and subscribers, pyntcore interop tests, load benchmark, decoder fuzzer, crates.io readiness | Merged (PRs #3 to #7) |
 | 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | Merged (PR #8) |
-| 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | In review (branch `claude/server-runtime`) |
-| 6 | Release and publish to crates.io | Not started |
+| 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | Merged (PR #9) |
+| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code in review (branch `claude/release-prep`); release not started |
 
 ## Milestone 4: `ServerCore`
 
@@ -112,6 +112,57 @@ wpiutil's JSON writer decodes UTF-8 into `wint_t`, which is 16 bits there.
 nt4 writes the surrogate pair. A persistent infinite double is written as
 `1e5000` by both; nt4's loader (serde_json) can't read that number back, so
 such a file fails to load in nt4.
+
+## Milestone 6: structs, protobuf and schemas
+
+Typed struct topics (`nt4::structs`, `nt4::wpimath`):
+
+- `NtStruct` is wpiutil's `Struct<T>`: a type name, a packed size, a schema
+  string, pack and unpack. Any `T: NtStruct` is an `NtValue`, so
+  `publish::<T>` / `subscribe::<T>` work for `T` (`struct:<Name>`) and
+  `Vec<T>` (`struct:<Name>[]`). `StructField` and `StructReader` make the
+  pack and unpack code short, and `structs::check::<T>()` tests a hand
+  implementation against its own schema.
+- `nt4::wpimath` has WPILib 2027's geometry and kinematics structs
+  (`Translation2d` to `Twist3d`, `ChassisVelocities`,
+  `SwerveModulePosition`, `SwerveModuleVelocity`), with the same names,
+  schemas and nested-schema order as wpimath's `*Struct.hpp`.
+- `NtProtobuf` plus the `Proto<T>` wrapper give `proto:<message>` topics.
+  There's no protobuf dependency: with prost, encode and decode are
+  `prost::Message`'s and the descriptors come from prost-build's
+  `FileDescriptorSet`.
+- Publishing a typed struct or protobuf topic registers its schemas as
+  ntcore's `AddSchema` does: once per client or server, on a retained
+  `/.schema/<name>` topic (`structschema` or `proto:FileDescriptorProto`)
+  with the schema as a default value, nested structs first. `add_schema` /
+  `has_schema` are public for raw topics. One difference: ntcore registers
+  them on a publisher's first `Set`, nt4 when publishing.
+
+Run-time decoding (`nt4_proto::structs`, no I/O): a port of wpiutil's
+`SchemaParser` and `DynamicStruct` (`StructDatabase`, `DynamicStruct`,
+`DynamicStructMut`, `FieldValue`), so a dashboard can decode structs it
+learns about from `/.schema/` topics. Same layout rules, bit fields
+included, and the same error text. Where it differs, on purpose:
+
+- A rejected schema changes nothing (wpiutil leaves the struct
+  half-updated, with its links to other structs kept).
+- A struct over 1 GiB is refused (wpiutil lets a huge array size wrap
+  around), and a nested struct field gets no bit mask (wpiutil computes one
+  with an out-of-range shift for structs over 8 bytes).
+- Getters and setters return `None` for a field of another type or struct,
+  or an index past the end, where wpiutil asserts; views of short data
+  aren't made at all.
+
+Tests: wpiutil's `SchemaParserTest` and `DynamicStructTest` and ntcore's
+`StructTest` are ported and tracked by the audit (175 of 175 cases). The
+not-applicable `StructTest` cases are C++ template variants, plus
+`std::array<T, N>` structs: wpiutil gives those the schema of `T` with
+`[N]` appended, which only makes the last field an array (another bug to
+report). Interop tests check, against pyntcore, that ntcore sees our schema
+topics exactly as it makes its own (type, bytes, properties) in both
+directions, and that we read ntcore's struct topics typed and through
+their schemas. The fuzzer also feeds every input to the schema parser and
+the dynamic views.
 
 ## What PR #3 found
 
@@ -213,22 +264,24 @@ check is enough.
 
 ## Next steps
 
-1. **Review and merge the milestone 5 PR** (`claude/server-runtime`).
-2. **Milestone 6: release.** Publish the crates to crates.io (the plan's
-   open question), struct and protobuf schema helpers, and manual checks
-   with AdvantageScope and Elastic against `nt4::Server` (the `server`
-   example).
-3. **Report the ntcore bugs to allwpilib** (`main`): the two parser bugs
+1. **Review and merge the struct PR** (`claude/release-prep`).
+2. **Manual checks** with AdvantageScope and Elastic against the `server`
+   example (it publishes a `Pose2d` at `/server/pose`) and the
+   `struct_topic` example.
+3. **Release.** Decide on crates.io (the plan's open question), then tag
+   and publish `nt4-proto`, `nt4-core` and `nt4` in that order.
+4. **Report the ntcore bugs to allwpilib** (`main`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale
-   announce flag), and the Windows persistent-file bug.
-4. **Look at nt4's cost per frame** on localhost and per published value
+   announce flag), the Windows persistent-file bug, and the
+   `std::array` struct schema.
+5. **Look at nt4's cost per frame** on localhost and per published value
    (see the benchmark notes below).
 
 ## Picking this up locally
 
 ```bash
 git clone https://github.com/tuffinmuffin/nt4-rs && cd nt4-rs
-git switch claude/server-runtime   # milestone 5, until it merges
+git switch claude/release-prep   # milestone 6 structs, until it merges
 cargo test --workspace
 ```
 

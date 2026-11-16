@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use nt4_fuzz::{
-    Mismatch, Rng, Target, check, drive_client_core, drive_server_core, generate, has_oracle,
-    shrink,
+    Mismatch, Rng, Target, check, drive_client_core, drive_server_core, drive_structs, generate,
+    has_oracle, shrink,
 };
 
 fn arg(name: &str) -> Option<String> {
@@ -105,6 +105,8 @@ fn run() {
                 Some("ClientCore panicked")
             } else if std::panic::catch_unwind(|| drive_server_core(target, &input)).is_err() {
                 Some("ServerCore panicked")
+            } else if std::panic::catch_unwind(|| drive_structs(&input)).is_err() {
+                Some("struct schema code panicked")
             } else {
                 None
             };

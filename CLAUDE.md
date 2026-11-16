@@ -34,6 +34,12 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   types (`Publisher<T>`, `Subscriber<T>`, `Events`) live in `handles.rs` and
   serve both runtimes. Server interop tests are `tests/interop_server.rs`
   (pyntcore as the client). Build and test with `--all-features`.
+- Structs: `nt4_proto::structs` parses schemas and decodes values at run
+  time (port of wpiutil's `SchemaParser` / `DynamicStruct`; tests in
+  `nt4-proto/tests/struct_schema.rs` and `dynamic_struct.rs`). `nt4::structs`
+  has the typed `NtStruct` / `NtProtobuf` traits and schema registration;
+  `nt4::wpimath` the WPILib types, whose schemas must match wpimath's
+  `*Struct.hpp` exactly.
 
 ## Rules
 

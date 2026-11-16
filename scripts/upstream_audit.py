@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that every ntcore test case we track has been ported.
+"""Check that every ntcore (and wpiutil struct) test case we track has been ported.
 
 Usage: python3 scripts/upstream_audit.py <path to allwpilib checkout>
 
@@ -24,6 +24,9 @@ TRACKED = [
     "ntcore/src/test/native/cpp/TimeSyncTest.cpp",
     "ntcore/src/test/native/cpp/server/ServerImplTest.cpp",
     "ntcore/src/test/native/cpp/NetworkServerTest.cpp",
+    "ntcore/src/test/native/cpp/StructTest.cpp",
+    "wpiutil/src/test/native/cpp/struct/SchemaParserTest.cpp",
+    "wpiutil/src/test/native/cpp/struct/DynamicStructTest.cpp",
 ]
 
 REPO = pathlib.Path(__file__).resolve().parent.parent

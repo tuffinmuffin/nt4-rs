@@ -24,7 +24,7 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -107,6 +107,8 @@ struct State {
     watchers: HashMap<String, watch::Sender<Option<TopicValue>>>,
     /// Queues for [`Client::events`] listeners.
     listeners: Vec<mpsc::UnboundedSender<Event>>,
+    /// Schemas published so far (by name, without `/.schema/`).
+    schemas: HashSet<String>,
 }
 
 struct Shared {
@@ -203,6 +205,7 @@ impl Client {
                 core: ClientCore::new(),
                 watchers: HashMap::new(),
                 listeners: Vec::new(),
+                schemas: HashSet::new(),
             }),
             flush: Notify::new(),
             wake: Notify::new(),
@@ -216,7 +219,8 @@ impl Client {
         }
     }
 
-    /// Publish a typed topic.
+    /// Publish a typed topic. For a struct or protobuf type, its schemas
+    /// are published first (see [`add_schema`](Self::add_schema)).
     ///
     /// ```
     /// # #[tokio::main(flavor = "current_thread")] async fn main() {
@@ -225,10 +229,55 @@ impl Client {
     /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
     /// let speed = client.publish::<f64>("/robot/speed", Default::default());
     /// speed.set(1.5); // sent once connected
+    ///
+    /// use nt4::wpimath::Pose2d;
+    /// let pose = client.publish::<Pose2d>("/vision/pose", Default::default());
+    /// assert!(client.has_schema("struct:Pose2d"));
+    /// pose.set(Pose2d::default());
     /// # }
     /// ```
     pub fn publish<T: NtValue>(&self, name: &str, options: PublishOptions) -> Publisher<T> {
+        T::for_each_schema(&mut |name, ty, data| self.add_schema(name, ty, data));
         Publisher::new(self.publish_generic(name, T::nt_type(), Properties::new(), options))
+    }
+
+    /// Publish a data schema on `/.schema/<name>` (retained, with the schema
+    /// as a default value), once: later calls with the same name do
+    /// nothing, as with ntcore's `AddSchema`. [`publish`](Self::publish)
+    /// does this for struct and protobuf types; call it yourself for raw
+    /// topics published with [`publish_generic`](Self::publish_generic).
+    ///
+    /// The schema stays published until the client stops.
+    ///
+    /// ```
+    /// # #[tokio::main(flavor = "current_thread")] async fn main() {
+    /// use nt4::{Client, ClientConfig};
+    /// let client = Client::start(ClientConfig::server("docs", "127.0.0.1", 1));
+    /// client.add_schema("struct:Point", "structschema", b"double x;double y");
+    /// assert!(client.has_schema("struct:Point"));
+    /// # }
+    /// ```
+    pub fn add_schema(&self, name: &str, ty: &str, schema: &[u8]) {
+        let mut state = self.shared.lock();
+        if !state.schemas.insert(name.to_owned()) {
+            return;
+        }
+        let id = state.core.publish(
+            format!("{}{name}", crate::structs::SCHEMA_PREFIX),
+            NtType::from(ty),
+            crate::structs::schema_properties(),
+            PublishOptions::default(),
+        );
+        // The type is raw (id 5) whatever the schema type, so this can't fail.
+        let _ = state.core.set_value(id, Value::Raw(schema.to_vec()), 0);
+        drop(state);
+        self.shared.wake.notify_one();
+    }
+
+    /// Whether [`add_schema`](Self::add_schema) (or a typed
+    /// [`publish`](Self::publish)) has published schema `name`.
+    pub fn has_schema(&self, name: &str) -> bool {
+        self.shared.lock().schemas.contains(name)
     }
 
     /// Publish a topic with any type string and initial properties, for

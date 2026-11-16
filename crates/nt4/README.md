@@ -80,9 +80,24 @@ warnings about what clients send.
 | `Vec<u8>` | `raw` |
 | `Vec<bool>`, `Vec<f64>`, `Vec<i64>`, `Vec<f32>`, `Vec<String>` | `boolean[]`, `double[]`, `int[]`, `float[]`, `string[]` |
 
-Structs, protobuf and other raw types use `Client::publish_generic` with an
-`NtType` such as `NtType::Struct { name: "Pose2d".into(), array: false }`;
-see the `struct_topic` example.
+Structs are typed too. `nt4::wpimath` has WPILib's geometry and kinematics
+types (`Pose2d`, `Pose3d`, `SwerveModuleVelocity`, ...), and your own types
+implement `NtStruct`. Publishing one also publishes its schema under
+`/.schema/`, as ntcore does, so AdvantageScope and Elastic can decode it:
+
+```rust,no_run
+# async fn demo(client: nt4::Client) {
+use nt4::wpimath::{Pose2d, SwerveModuleVelocity};
+let pose = client.publish::<Pose2d>("/vision/pose", Default::default());
+let modules = client.publish::<Vec<SwerveModuleVelocity>>("/drive/modules", Default::default());
+pose.set(Pose2d::default());
+# }
+```
+
+Protobuf messages implement `NtProtobuf` and publish as `Proto<T>`. To
+decode structs whose type you only learn at run time (a dashboard), read the
+`/.schema/` topics into `nt4::proto::structs::StructDatabase`. Other raw
+types use `publish_generic` with any `NtType`.
 
 To watch many topics at once, `Client::subscribe_multiple` with
 `SubscriptionOptions { prefix: true, .. }` and read `Client::events()`, which
@@ -99,7 +114,7 @@ with `pip install pyntcore`), then:
 | `cargo run -p nt4 --example sync_loop -- 127.0.0.1` | uses the client from a plain (non-async) 50 Hz loop, the way robot code uses ntcore |
 | `cargo run -p nt4 --example watch -- 127.0.0.1 /` | prints every topic and value under a prefix; pass a team number instead of a host to find a robot |
 | `cargo run -p nt4 --example publish -- 127.0.0.1` | publishes a counter and a sine wave, and reads a gain other clients can set |
-| `cargo run -p nt4 --example struct_topic -- 127.0.0.1` | publishes a `Translation2d` struct with its schema |
+| `cargo run -p nt4 --example struct_topic -- 127.0.0.1` | publishes a `Pose2d` and swerve module states, with their schemas |
 | `cargo run -p nt4 --features server --example server` | runs a server on 5810 with a few topics; point AdvantageScope, Elastic or the other examples at it |
 
 ## How it fits together

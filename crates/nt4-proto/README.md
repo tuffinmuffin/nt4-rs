@@ -19,5 +19,10 @@ Encoding matches WPILib's ntcore byte for byte, and decoding accepts and
 rejects the same input with the same warning text. Every case of ntcore's
 `WireEncoderTest` and `WireDecoderTest` is ported as a test.
 
+`nt4_proto::structs` reads WPILib struct values whose type is only known at
+run time: it parses the schemas from `/.schema/struct:*` topics (a port of
+wpiutil's `SchemaParser` and `DynamicStruct`, with their tests) and reads
+and writes fields by name.
+
 License: MIT. Ported WPILib tests keep WPILib's BSD license
 (`tests/LICENSE-WPILIB.md`).

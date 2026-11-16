@@ -7,6 +7,11 @@
 //! that ntcore clients (dashboards, robot code, coprocessors) connect to,
 //! with the same typed handles for the server's own topics.
 //!
+//! Struct and protobuf topics (`struct:Pose2d`, ...) are typed too:
+//! implement [`NtStruct`] or [`NtProtobuf`], or use the WPILib types in
+//! [`wpimath`]. Publishing one registers its schemas under `/.schema/`, as
+//! ntcore does; see [`structs`].
+//!
 //! The protocol work happens in [`nt4_core`], which has no I/O; this crate
 //! adds the WebSocket (tokio-tungstenite) and the clock.
 //!
@@ -39,7 +44,9 @@ pub mod client;
 pub mod handles;
 #[cfg(feature = "server")]
 pub mod server;
+pub mod structs;
 pub mod typed;
+pub mod wpimath;
 
 #[cfg(feature = "client")]
 pub use client::{Client, ClientConfig};
@@ -53,6 +60,7 @@ pub use nt4_core::{
 pub use nt4_proto::{NtType, Properties, SubscriptionOptions, Value};
 #[cfg(feature = "server")]
 pub use server::{ConnectedClient, Server, ServerConfig};
+pub use structs::{NtProtobuf, NtStruct, Proto};
 pub use typed::NtValue;
 
 /// The wire format crate, [`nt4_proto`], for constants such as

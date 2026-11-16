@@ -4,12 +4,14 @@
 //! cargo run -p nt4 --features server --example server [port]
 //! ```
 //!
-//! Publishes `/server/uptime` (seconds), `/server/sine` and a retained
-//! `/server/name`, watches `/dashboard/gain` (set it from a dashboard), and
-//! prints the connected clients once a second.
+//! Publishes `/server/uptime` (seconds), `/server/sine`, a retained
+//! `/server/name` and a `Pose2d` struct at `/server/pose` (driving in a
+//! circle, for AdvantageScope's field view), watches `/dashboard/gain` (set
+//! it from a dashboard), and prints the connected clients once a second.
 
 use std::time::Duration;
 
+use nt4::wpimath::{Pose2d, Rotation2d, Translation2d};
 use nt4::{NtType, Properties, Server, ServerConfig, ServerEvent, Value};
 
 #[tokio::main]
@@ -29,6 +31,7 @@ async fn main() -> std::io::Result<()> {
     name.set(Value::String("nt4 example server".into()))
         .unwrap();
     let gain = server.subscribe::<f64>("/dashboard/gain", Default::default());
+    let pose = server.publish::<Pose2d>("/server/pose");
 
     let mut events = server.events();
     let mut tick = tokio::time::interval(Duration::from_millis(20));
@@ -38,6 +41,16 @@ async fn main() -> std::io::Result<()> {
         let t = server.now_us() as f64 / 1e6;
         uptime.set(t);
         sine.set((t * std::f64::consts::TAU / 4.0).sin());
+        let angle = t * 0.5;
+        pose.set(Pose2d {
+            translation: Translation2d {
+                x: 8.0 + 3.0 * angle.cos(),
+                y: 4.0 + 3.0 * angle.sin(),
+            },
+            rotation: Rotation2d {
+                value: angle + std::f64::consts::FRAC_PI_2,
+            },
+        });
         while let Some(e) = events.try_recv() {
             if let ServerEvent::Warning(w) = e {
                 eprintln!("warning: {w}");
