@@ -12,7 +12,10 @@ topics), then runs each client against it, one at a time:
   ntcore-native    bench/ntcore_client.py --mode native (C++ only, no per-value Python)
 
 While a client runs, its CPU time (user + system) and peak memory (VmHWM)
-are read from /proc, so this needs Linux. Each client gets a fresh server.
+are read from /proc on Linux. Elsewhere (macOS) they come from `ps`, which
+gives the current RSS rather than the peak, so memory is the largest sample;
+compare those numbers with each other, not with Linux runs. Each client gets
+a fresh server.
 
 --scenario publish swaps the roles: the robot is the client under test,
 publishing the same topics to an empty ntcore server, and an ntcore listener
@@ -37,8 +40,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 
+def ps_time(text):
+    """Seconds from ps's `[[dd-]hh:]mm:ss.cc` CPU time."""
+    days, _, rest = text.rpartition("-")
+    seconds = 0.0
+    for part in rest.split(":"):
+        seconds = seconds * 60 + float(part)
+    return seconds + (int(days) * 86400 if days else 0)
+
+
 def proc_stats(pid):
-    """(cpu seconds, peak RSS in MiB) of a running process, from /proc."""
+    """(cpu seconds, peak RSS in MiB) of a running process, from /proc, or
+    from ps where there is no /proc (current RSS there, not the peak)."""
+    if not os.path.exists("/proc/self/stat"):
+        out = subprocess.run(
+            ["ps", "-o", "time=,rss=", "-p", str(pid)],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        return ps_time(out[0]), int(out[1]) / 1024
     with open(f"/proc/{pid}/stat") as f:
         fields = f.read().rsplit(")", 1)[1].split()
     ticks = os.sysconf("SC_CLK_TCK")

@@ -159,8 +159,9 @@ Publish, 200 and 840 topics:
 - On localhost the server sends one frame per value, so everyone pays per
   frame instead of per batch: latency drops to a few ms and CPU goes up
   several times. Here nt4 is the slower library at high rates: 71% of a core
-  against ntcore's 49% at 157,000 frames/s, and about equal at 16,400. nt4's
-  cost per frame is the thing to look at next. At 1,640 topics the Python
+  against ntcore's 49% at 157,000 frames/s, and about equal at 16,400. (Since
+  these runs, nt4's receive path costs about a quarter less here; see
+  `docs/STATUS.md`.) At 1,640 topics the Python
   clients could not keep up and missed values (the `lost` column).
 - nt4 does not have ntcore 2027's local mode as a sender, so on localhost
   `nt4-robot` still batches (p50 13 to 18 ms against ntcore's 3 to 7 ms) and

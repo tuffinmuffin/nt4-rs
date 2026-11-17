@@ -176,7 +176,7 @@ no values in any run. Over a network address, with no per-value code, nt4
 used less CPU and memory than C++ ntcore. On localhost ntcore 2027 sends one
 frame per value, and there nt4 uses more CPU than ntcore at high rates (71%
 against 49% of a core at 157,000 frames/s); nt4's cost per frame is worth a
-look.
+look. (Looked at on 2026-11-16, below: the gap is now about a fifth.)
 
 It also found three problems, fixed in PR #3:
 
@@ -270,6 +270,19 @@ per published value from 4.3 to 0.2. `client_publish` measures a new
 client's first loop, which creates every topic's bookkeeping; a steady-state
 benchmark would track a running robot better.
 
+The localhost cost per frame, profiled with `perf` on a 2-core arm64 Ubuntu
+26.04 VM (Parallels): 13% of nt4-native's samples were tungstenite
+zero-filling its 128 KiB read buffer before each read (a localhost read
+brings in about one 50-byte frame), and 6% were atomics from `tokio::select!`
+setting up its wakeups again for every frame, plus a new timer per frame.
+With an 8 KiB read buffer, frames batched under one lock, one timer per
+connection and no empty flushes, nt4-native went from 36.5% to 27.8% of a
+core at scale 10 (ntcore-native 23.2%), and the event-stream client from
+48.8% to 34.5%, still with no values lost; over the network address it was
+the same or lower (4.8% both; `nt4` 15.8% to 13.1%). The rest is mostly
+kernel and syscall time. On macOS the smaller buffer gave no net gain, since
+there the extra, smaller reads cost what the zero-fill saved.
+
 The `bench/` load benchmark against pyntcore stays a manual tool and is not
 run in CI. nt4 is meant for hosts and coprocessors, so the instruction-count
 check is enough.
@@ -325,9 +338,12 @@ check is enough.
    below, the two server ones above (the missing `ack`, and the stale
    announce flag), the Windows persistent-file bug, and the
    `std::array` struct schema.
-4. **Look at nt4's cost per frame** on localhost and per published value
-   (see the benchmark notes below). No CI `perf` warning has fired (PRs
-   #8 to #11); this is the gap against ntcore, not a regression.
+4. **nt4's cost per frame** on localhost and per published value: done in
+   PR #13 (see the benchmark notes below). Localhost receive is now within
+   about a fifth of ntcore on a 2-core VM; the rest is mostly kernel time.
+   Worth rerunning `bench/` on the 4-core x86 VM the README tables came
+   from. (No CI `perf` warning fired on PRs #8 to #12 because the job reran
+   the base's binary for the PR; fixed in #13.)
 
 ## Picking this up locally
 
