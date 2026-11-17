@@ -98,13 +98,21 @@ jobs:
   publish:
     needs: check
     runs-on: ubuntu-latest
-    # Holds CARGO_REGISTRY_TOKEN. Its protection rules (if any) apply here.
+    # crates.io trusts this repository's release.yml in the Deploy
+    # environment (each crate's Settings > Trusted Publishing on crates.io).
+    # The environment's protection rules (if any) apply here.
     environment: Deploy
     permissions:
       contents: write # to create the GitHub release
+      id-token: write # for the crates.io trusted publishing token
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      # A crates.io token for this run only (it lasts 30 minutes and is
+      # revoked when the job ends), instead of a long-lived secret.
+      - uses: rust-lang/crates-io-auth-action@v1.0.6
+        id: auth
 
       # One crate at a time, skipping any this version already has on
       # crates.io, so a run that failed partway can simply be re-run.
@@ -112,7 +120,7 @@ jobs:
       # the next one, which needs it, is published.)
       - name: Publish to crates.io
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           for c in $CRATES; do

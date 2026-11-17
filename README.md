@@ -113,7 +113,9 @@ together, by CI, when a version tag is pushed:
    tag matches the crates' version, that the commit is on `main` with CI
    passed, and that the changelog has the section. Then it publishes
    `nt4-proto`, `nt4-core`, `nt4-derive`, `nt4` and `nt4-wpimath` in that order with the
-   `Deploy` environment's `CARGO_REGISTRY_TOKEN`, and creates the GitHub
+   a short-lived token from crates.io trusted publishing (each crate on
+   crates.io trusts this repository's `release.yml` in the `Deploy`
+   environment), and creates the GitHub
    release from the changelog section.
 
 If publishing fails partway, re-run the workflow: crates already on
