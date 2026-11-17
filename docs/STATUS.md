@@ -336,8 +336,9 @@ check is enough.
 3. **Report the ntcore bugs to allwpilib** (side todo, tracked
    separately; notes in `docs/UPSTREAM_BUGS.md`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale
-   announce flag), the Windows persistent-file bug, and the
-   `std::array` struct schema.
+   announce flag), the Windows persistent-file bug, the
+   `std::array` struct schema, and two client queue-ordering bugs (a
+   `setproperties` overtaking its `publish`, and a dropped flush).
 4. **nt4's cost per frame** on localhost and per published value: done in
    PR #13 (see the benchmark notes below). Localhost receive is now within
    about a fifth of ntcore on a 2-core VM; the rest is mostly kernel time.

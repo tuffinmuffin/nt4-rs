@@ -556,3 +556,37 @@ fn tick_period_follows_publish_periods() {
     client.publish("/c", NtType::Double, Properties::new(), opts(0.001));
     assert_eq!(client.tick_period_ms(), 5);
 }
+
+// ntcore queues `setproperties` under id 0 while the `publish` it follows
+// waits in the publisher's own queue; with a non-default period both come due
+// in one send and the `setproperties` can go first, so a server ignores it.
+// nt4 keeps it behind the publish (see `ClientCore::set_properties`).
+#[test]
+fn set_properties_right_after_publish_is_sent_after_it() {
+    let mut client = ClientCore::new();
+    connect_synced(&mut client, 1_000, ProtocolVersion::V4_1);
+    drain_transmit(&mut client);
+    let options = PublishOptions {
+        periodic: Some(10.0),
+        ..Default::default()
+    };
+    client.publish("/slow", NtType::Int, Properties::new(), options);
+    let mut update = Properties::new();
+    update.insert("persistent".into(), true.into());
+    client.set_properties("/slow", update);
+    client.send_outgoing(2_000, false);
+
+    let methods: Vec<&str> = drain_transmit(&mut client)
+        .iter()
+        .flat_map(|o| match o {
+            Out::Text(msgs) => msgs.iter().collect(),
+            _ => Vec::new(),
+        })
+        .map(|m| match m {
+            ClientMessage::Publish { .. } => "publish",
+            ClientMessage::SetProperties { .. } => "setproperties",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(methods, ["publish", "setproperties"]);
+}

@@ -298,6 +298,9 @@ pub struct OutgoingQueue<M> {
     last_set_period: u32,
     last_set_period_queue_index: usize,
     local: bool,
+    /// A flush that couldn't happen yet (rate limit or wire busy); the next
+    /// send does it.
+    flush_pending: bool,
     /// Reused buffer for encoding one value message.
     scratch: Vec<u8>,
 }
@@ -315,6 +318,7 @@ impl<M: TextMessage> OutgoingQueue<M> {
             last_set_period: DEFAULT_PERIOD_MS,
             last_set_period_queue_index: 0,
             local,
+            flush_pending: false,
             scratch: Vec::new(),
         }
     }
@@ -470,18 +474,23 @@ impl<M: TextMessage> OutgoingQueue<M> {
 
     /// Write every queue that is due (or every non-empty queue if `flush`)
     /// to `wire`, oldest-due first. Does nothing if called again within
-    /// [`MIN_PERIOD_MS`] of the last send, or while the wire isn't ready.
+    /// [`MIN_PERIOD_MS`] of the last send, or while the wire isn't ready;
+    /// a flush asked for then is done by the next send that can go.
+    ///
+    /// ntcore drops such a flush: its next send takes only the queues that
+    /// are due, so a value in a slow publisher's queue waits a whole period.
     pub fn send_outgoing(&mut self, wire: &mut impl Wire, now_ms: u64, flush: bool) {
         if self.local || self.total_size == 0 {
             return;
         }
+        let flush = flush || self.flush_pending;
         // Rate limit how often remote connections send.
-        if now_ms < self.last_send_ms + u64::from(MIN_PERIOD_MS) {
+        if now_ms < self.last_send_ms + u64::from(MIN_PERIOD_MS) || !wire.ready() {
+            // (`!ready`: still sending the last batch.)
+            self.flush_pending = flush;
             return;
         }
-        if !wire.ready() {
-            return; // still sending the last batch
-        }
+        self.flush_pending = false;
 
         let mut due: Vec<usize> = (0..self.queues.len())
             .filter(|&i| {

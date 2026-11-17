@@ -631,6 +631,13 @@ async fn run_connection(
             }
             _ = shared.flush.notified() => {
                 shared.lock().core.send_outgoing(shared.now_us(), true);
+                // A flush within the minimum period of the last send waits
+                // in the queue; come back as soon as it can go.
+                let soon = Instant::now()
+                    + Duration::from_millis(u64::from(nt4_core::outgoing::MIN_PERIOD_MS));
+                if tick.deadline() > soon {
+                    tick.as_mut().reset(soon);
+                }
             }
         }
     }

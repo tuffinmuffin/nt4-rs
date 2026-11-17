@@ -69,6 +69,40 @@ unless noted. Earlier write-up of the two parser bugs:
 - nt4: has no fixed-array struct type; `StructTest StructFixedArray*` are in
   `scripts/upstream_na.txt`.
 
+## 7. Client `setproperties` can overtake the `publish` it follows
+
+- Where: `ntcore/src/main/native/cpp/net/ClientImpl.cpp`, `HandleLocal`:
+  `PublishMsg` goes to `m_outgoing.SendMessage(msg->pubuid, ...)` (the
+  publisher's own period queue), everything else, `SetPropertiesMsg`
+  included, to `SendMessage(0, ...)` (the default queue).
+- Repro: publish with `periodic` other than the default, then set a
+  property before the next send. Both queues are due in the same
+  `SendOutgoing`, which orders them by `nextSendMs`; the default queue can
+  sort first, so `setproperties` reaches the server before `publish`, and
+  the server ignores it ("unpublished topic").
+- Fix: queue `setproperties` for a topic this client publishes under that
+  publisher's id, so it stays behind the `publish`.
+- nt4: does that (`ClientCore::set_properties`); test
+  `set_properties_right_after_publish_is_sent_after_it` in
+  `crates/nt4-core/tests/client.rs`.
+
+## 8. A flush within 5 ms of the last send is dropped
+
+- Where: `ntcore/src/main/native/cpp/net/NetworkOutgoingQueue.hpp:204`,
+  `SendOutgoing`: the `MIN_PERIOD_MS` rate limit (and the `m_wire.Ready()`
+  check after it) returns before `flush` is looked at, and nothing
+  remembers it.
+- Repro: publish with a long `periodic`, send something (e.g. a property
+  change), then within 5 ms set a value and call `Flush()`. The flush does
+  nothing; the next periodic `SendOutgoing` takes only queues that are due,
+  so the value waits for its publisher's period.
+- Fix: keep the flush pending and do it on the next send that gets past the
+  rate limit.
+- nt4: does that (`OutgoingQueue::send_outgoing`; the tokio client also
+  retries 5 ms after a flush); test
+  `a_rate_limited_flush_is_kept_for_the_next_send` in
+  `crates/nt4-core/tests/outgoing_queue.rs`.
+
 ## Also worth mentioning (spec, not code)
 
 - `ntcore/doc/networktables4.adoc`, data types table: the `protobuf` row
