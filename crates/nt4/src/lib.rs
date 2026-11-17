@@ -44,6 +44,15 @@ pub mod client;
 pub mod handles;
 #[cfg(feature = "server")]
 pub mod server;
+
+/// How much tungstenite reads from the socket at a time. Its default,
+/// 128 KiB, is zero-filled before every read; NT frames are small (on
+/// localhost ntcore sends one ~50-byte frame per value), so that fill was
+/// the largest single cost of receiving. Bigger messages still arrive, over
+/// several reads.
+#[cfg(any(feature = "client", feature = "server"))]
+pub(crate) const READ_BUFFER_SIZE: usize = 8 * 1024;
+
 pub mod structs;
 pub mod typed;
 

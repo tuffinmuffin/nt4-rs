@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use nt4_core::{
     ClientError, ClientId, ProtocolVersion, PubId, ServerCore, ServerError, ServerEvent, SubId,
     TopicValue, Transmit,
@@ -944,6 +944,7 @@ async fn connection(
         Ok(resp)
     };
     let config = WebSocketConfig::default()
+        .read_buffer_size(crate::READ_BUFFER_SIZE)
         .max_message_size(Some(MAX_MESSAGE_SIZE))
         .max_frame_size(Some(MAX_MESSAGE_SIZE));
     let Ok(ws) = tokio_tungstenite::accept_hdr_async_with_config(tcp, callback, Some(config)).await
@@ -1008,6 +1009,9 @@ async fn run_rtt(shared: &Shared, ws: Ws, mut stop: watch::Receiver<bool>) {
     }
 }
 
+/// Most frames handled per wakeup before the timer and wakeups get a turn.
+const MAX_BATCH: usize = 256;
+
 /// Run one NT4 client connection until it ends.
 async fn run_client(
     shared: &Shared,
@@ -1039,35 +1043,43 @@ async fn run_client(
     };
 
     let (mut sink, mut stream) = ws.split();
-    let mut next_tick = Instant::now();
+    // One timer for the connection, moved forward when it fires (see the
+    // client's `run_connection`).
+    let tick = tokio::time::sleep_until(Instant::now());
+    tokio::pin!(tick);
+    let mut out = Vec::new();
+    // tungstenite queues the pong to a ping; the next flush sends it.
+    let mut pong_queued = false;
     'conn: loop {
         // Take frames only when the socket has room (this loop is not
         // waiting on a write), so while a slow client catches up its values
         // keep coalescing in the core's queue.
-        let (out, period) = {
+        let period = {
             let mut state = shared.lock();
-            let out: Vec<Transmit> = std::iter::from_fn(|| state.core.poll_transmit(id)).collect();
-            (out, state.core.tick_period_ms(id))
+            out.extend(std::iter::from_fn(|| state.core.poll_transmit(id)));
+            Duration::from_millis(u64::from(state.core.tick_period_ms(id)))
         };
-        for t in out {
-            let msg = match t {
-                Transmit::Text(s) => Message::Text(s.into()),
-                Transmit::Binary(b) => Message::Binary(b.into()),
-                Transmit::Ping => Message::Ping(Vec::new().into()),
-                Transmit::Close { .. } => {
-                    let _ = sink.send(Message::Close(None)).await;
+        if !out.is_empty() || pong_queued {
+            for t in out.drain(..) {
+                let msg = match t {
+                    Transmit::Text(s) => Message::Text(s.into()),
+                    Transmit::Binary(b) => Message::Binary(b.into()),
+                    Transmit::Ping => Message::Ping(Vec::new().into()),
+                    Transmit::Close { .. } => {
+                        let _ = sink.send(Message::Close(None)).await;
+                        break 'conn;
+                    }
+                };
+                if sink.feed(msg).await.is_err() {
                     break 'conn;
                 }
-            };
-            if sink.feed(msg).await.is_err() {
-                break 'conn;
             }
-        }
-        if sink.flush().await.is_err() {
-            break;
+            if sink.flush().await.is_err() {
+                break;
+            }
+            pong_queued = false;
         }
 
-        let period = Duration::from_millis(u64::from(period));
         tokio::select! {
             _ = stop.changed() => {
                 let _ = sink.send(Message::Close(None)).await;
@@ -1076,23 +1088,41 @@ async fn run_client(
             msg = stream.next() => {
                 let now = shared.now_us();
                 let mut state = shared.lock();
-                match msg {
-                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
-                    Some(Ok(Message::Text(t))) => state.core.handle_text(id, now, &t),
-                    Some(Ok(Message::Binary(b))) => state.core.handle_binary(id, now, &b),
-                    // tungstenite queues the pong to a ping; the flush above
-                    // sends it. Either counts as hearing from the client.
-                    Some(Ok(Message::Pong(_) | Message::Ping(_))) => state.core.handle_pong(id, now),
-                    Some(Ok(Message::Frame(_))) => {}
+                let mut msg = msg;
+                // Every frame tungstenite already has, under one lock.
+                let mut handled = 0;
+                loop {
+                    match msg {
+                        None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break 'conn,
+                        Some(Ok(Message::Text(t))) => state.core.handle_text(id, now, &t),
+                        Some(Ok(Message::Binary(b))) => state.core.handle_binary(id, now, &b),
+                        // Either counts as hearing from the client.
+                        Some(Ok(Message::Pong(_))) => state.core.handle_pong(id, now),
+                        Some(Ok(Message::Ping(_))) => {
+                            state.core.handle_pong(id, now);
+                            pong_queued = true;
+                        }
+                        Some(Ok(Message::Frame(_))) => {}
+                    }
+                    // Stop before taking a frame off the stream, never
+                    // after: a frame taken here must be handled.
+                    handled += 1;
+                    if handled == MAX_BATCH {
+                        break;
+                    }
+                    match stream.next().now_or_never() {
+                        Some(m) => msg = m,
+                        None => break,
+                    }
                 }
                 state.settle();
             }
-            _ = tokio::time::sleep_until(next_tick) => {
+            () = &mut tick => {
                 let now = shared.now_us();
                 let mut state = shared.lock();
                 state.core.send_outgoing(id, now, false);
                 state.settle();
-                next_tick = Instant::now() + period;
+                tick.as_mut().reset(Instant::now() + period);
             }
             _ = notify.notified() => {}
         }

@@ -347,6 +347,37 @@ impl Default for ServerCore {
     }
 }
 
+/// Send one value of `topic` (named `name`) to the client in `slot`: queue
+/// it for a remote client, or make an event for the server's own. Takes the
+/// fields it needs so callers can keep borrowing the topic.
+#[allow(clippy::too_many_arguments)]
+fn send_value_to(
+    clients: &mut [Option<Client>],
+    events: &mut VecDeque<Event>,
+    name: &Arc<str>,
+    slot: usize,
+    topic: usize,
+    time_us: i64,
+    value: &Value,
+    mode: SendMode,
+) {
+    let client = clients[slot].as_mut().expect("client exists");
+    match &mut client.remote {
+        None => events.push_back(Event::Value {
+            name: name.clone(),
+            id: topic as i32,
+            value: TopicValue {
+                value: value.clone(),
+                server_time_us: time_us,
+                local_time_us: time_us,
+            },
+        }),
+        Some(r) => r
+            .outgoing
+            .send_value(&mut r.wire, topic as i32, time_us, value, mode),
+    }
+}
+
 fn new_client(name: String, remote: Option<Remote>) -> Client {
     Client {
         name,
@@ -1233,28 +1264,17 @@ impl ServerCore {
         value: &Value,
         mode: SendMode,
     ) {
-        let client = self.clients[slot].as_mut().expect("client exists");
-        match &mut client.remote {
-            None => {
-                let name = self.topics[topic]
-                    .as_ref()
-                    .expect("topic exists")
-                    .name
-                    .clone();
-                self.events.push_back(Event::Value {
-                    name,
-                    id: topic as i32,
-                    value: TopicValue {
-                        value: value.clone(),
-                        server_time_us: time_us,
-                        local_time_us: time_us,
-                    },
-                });
-            }
-            Some(r) => r
-                .outgoing
-                .send_value(&mut r.wire, topic as i32, time_us, value, mode),
-        }
+        let name = &self.topics[topic].as_ref().expect("topic exists").name;
+        send_value_to(
+            &mut self.clients,
+            &mut self.events,
+            name,
+            slot,
+            topic,
+            time_us,
+            value,
+            mode,
+        );
     }
 
     /// Set the send period of a topic for a client to that of its
@@ -1468,15 +1488,23 @@ impl ServerCore {
                 self.persistent_changed = true;
             }
         }
-        let t = self.topic(topic);
-        let targets: Vec<(usize, SendMode)> = t
-            .clients
-            .iter()
-            .filter(|(slot, tcd)| Some(**slot) != sender && tcd.send_mode != SendMode::Disabled)
-            .map(|(&slot, tcd)| (slot, tcd.send_mode))
-            .collect();
-        for (slot, mode) in targets {
-            self.send_value(slot, topic, time_us, value, mode);
+        // Borrow the topic and the clients separately, so the targets need no
+        // list of their own (this runs for every value relayed).
+        let t = self.topics[topic].as_ref().expect("topic exists");
+        for (&slot, tcd) in &t.clients {
+            if Some(slot) == sender || tcd.send_mode == SendMode::Disabled {
+                continue;
+            }
+            send_value_to(
+                &mut self.clients,
+                &mut self.events,
+                &t.name,
+                slot,
+                topic,
+                time_us,
+                value,
+                tcd.send_mode,
+            );
         }
     }
 

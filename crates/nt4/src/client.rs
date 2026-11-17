@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use nt4_core::{
     ClientCore, ClientError, Event, ProtocolVersion, PubId, PublishOptions, SubId, Topic,
     TopicValue, Transmit,
@@ -523,7 +523,10 @@ async fn connect(url: &str) -> Result<(Ws, ProtocolVersion), tungstenite::Error>
     );
     // TCP_NODELAY, as ntcore does: values are small frames that should not
     // wait for the previous one's ACK.
-    let (ws, response) = tokio_tungstenite::connect_async_with_config(request, None, true).await?;
+    let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .read_buffer_size(crate::READ_BUFFER_SIZE);
+    let (ws, response) =
+        tokio_tungstenite::connect_async_with_config(request, Some(config), true).await?;
     let version = response
         .headers()
         .get(SEC_WEBSOCKET_PROTOCOL)
@@ -532,6 +535,9 @@ async fn connect(url: &str) -> Result<(Ws, ProtocolVersion), tungstenite::Error>
         .unwrap_or(ProtocolVersion::V4_0);
     Ok((ws, version))
 }
+
+/// Most frames handled per wakeup before the timers and wakeups get a turn.
+const MAX_BATCH: usize = 256;
 
 /// Run one connection until it ends; returns why it ended.
 async fn run_connection(
@@ -542,32 +548,41 @@ async fn run_connection(
 ) -> String {
     let (mut sink, mut stream) = ws.split();
     shared.lock().core.connect(shared.now_us(), version);
-    let mut next_tick = Instant::now();
+    // One timer for the whole connection, moved forward when it fires;
+    // creating one per received frame costs a timer-wheel insert each time.
+    let tick = tokio::time::sleep_until(Instant::now());
+    tokio::pin!(tick);
+    let mut out = Vec::new();
+    // tungstenite queues the pong to a ping; the next flush sends it.
+    let mut pong_queued = false;
     loop {
-        let out = {
+        let period = {
             let mut state = shared.lock();
             shared.dispatch_events(&mut state);
-            std::iter::from_fn(|| state.core.poll_transmit()).collect::<Vec<_>>()
+            out.extend(std::iter::from_fn(|| state.core.poll_transmit()));
+            Duration::from_millis(u64::from(state.core.tick_period_ms()))
         };
-        for t in out {
-            let msg = match t {
-                Transmit::Text(s) => Message::Text(s.into()),
-                Transmit::Binary(b) => Message::Binary(b.into()),
-                Transmit::Ping => Message::Ping(Vec::new().into()),
-                Transmit::Close { reason } => {
-                    let _ = sink.send(Message::Close(None)).await;
-                    return reason;
+        if !out.is_empty() || pong_queued {
+            for t in out.drain(..) {
+                let msg = match t {
+                    Transmit::Text(s) => Message::Text(s.into()),
+                    Transmit::Binary(b) => Message::Binary(b.into()),
+                    Transmit::Ping => Message::Ping(Vec::new().into()),
+                    Transmit::Close { reason } => {
+                        let _ = sink.send(Message::Close(None)).await;
+                        return reason;
+                    }
+                };
+                if let Err(e) = sink.feed(msg).await {
+                    return e.to_string();
                 }
-            };
-            if let Err(e) = sink.feed(msg).await {
+            }
+            if let Err(e) = sink.flush().await {
                 return e.to_string();
             }
-        }
-        if let Err(e) = sink.flush().await {
-            return e.to_string();
+            pong_queued = false;
         }
 
-        let period = Duration::from_millis(u64::from(shared.lock().core.tick_period_ms()));
         tokio::select! {
             _ = stop.changed() => {
                 let _ = sink.send(Message::Close(None)).await;
@@ -575,21 +590,41 @@ async fn run_connection(
             }
             msg = stream.next() => {
                 let now = shared.now_us();
-                match msg {
-                    None => return "connection closed".into(),
-                    Some(Err(e)) => return e.to_string(),
-                    Some(Ok(Message::Text(t))) => shared.lock().core.handle_text(now, &t),
-                    Some(Ok(Message::Binary(b))) => shared.lock().core.handle_binary(now, &b),
-                    Some(Ok(Message::Pong(_))) => shared.lock().core.handle_pong(now),
-                    // tungstenite queues the pong; the flush above sends it.
-                    Some(Ok(Message::Ping(_))) => shared.lock().core.handle_pong(now),
-                    Some(Ok(Message::Close(_))) => return "closed by server".into(),
-                    Some(Ok(Message::Frame(_))) => {}
+                let mut state = shared.lock();
+                let mut msg = msg;
+                // Handle every frame tungstenite already has, under one lock,
+                // before going back around the loop: on localhost ntcore
+                // sends each value in its own frame.
+                let mut handled = 0;
+                loop {
+                    match msg {
+                        None => return "connection closed".into(),
+                        Some(Err(e)) => return e.to_string(),
+                        Some(Ok(Message::Text(t))) => state.core.handle_text(now, &t),
+                        Some(Ok(Message::Binary(b))) => state.core.handle_binary(now, &b),
+                        Some(Ok(Message::Pong(_))) => state.core.handle_pong(now),
+                        Some(Ok(Message::Ping(_))) => {
+                            state.core.handle_pong(now);
+                            pong_queued = true;
+                        }
+                        Some(Ok(Message::Close(_))) => return "closed by server".into(),
+                        Some(Ok(Message::Frame(_))) => {}
+                    }
+                    // Stop before taking a frame off the stream, never
+                    // after: a frame taken here must be handled.
+                    handled += 1;
+                    if handled == MAX_BATCH {
+                        break;
+                    }
+                    match stream.next().now_or_never() {
+                        Some(m) => msg = m,
+                        None => break,
+                    }
                 }
             }
-            _ = tokio::time::sleep_until(next_tick) => {
+            () = &mut tick => {
                 shared.lock().core.send_outgoing(shared.now_us(), false);
-                next_tick = Instant::now() + period;
+                tick.as_mut().reset(Instant::now() + period);
             }
             _ = shared.wake.notified() => {
                 shared.lock().core.send_outgoing(shared.now_us(), false);

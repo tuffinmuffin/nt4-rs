@@ -25,8 +25,9 @@
 //! ```
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
-use nt4_proto::{BinaryMessage, TextMessage, Value, encode_binary};
+use nt4_proto::{TextMessage, Value, encode_binary_parts};
 
 /// Shortest time between two sends, and the shortest period a queue can
 /// have, in milliseconds.
@@ -250,6 +251,30 @@ impl<M> Queue<M> {
     }
 }
 
+/// Hasher for the queue's ids. They are always assigned on this side (a
+/// client's own pubuids, a server's own topic ids), never by the peer, so
+/// SipHash's protection against chosen keys isn't needed, and it was a
+/// noticeable part of the cost of each value. Multiplying by an odd
+/// constant spreads small, dense ids over the table's high bits.
+#[derive(Debug, Clone, Copy, Default)]
+struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        }
+    }
+    fn write_i32(&mut self, id: i32) {
+        self.0 = u64::from(id as u32).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+}
+
+type IdMap = HashMap<i32, IdInfo, BuildHasherDefault<IdHasher>>;
+
 #[derive(Debug, Clone, Copy, Default)]
 struct IdInfo {
     queue_index: usize,
@@ -266,13 +291,15 @@ struct IdInfo {
 #[derive(Debug, Clone)]
 pub struct OutgoingQueue<M> {
     queues: Vec<Queue<M>>,
-    id_map: HashMap<i32, IdInfo>,
+    id_map: IdMap,
     total_size: usize,
     last_send_ms: u64,
     time_offset_us: i64,
     last_set_period: u32,
     last_set_period_queue_index: usize,
     local: bool,
+    /// Reused buffer for encoding one value message.
+    scratch: Vec<u8>,
 }
 
 impl<M: TextMessage> OutgoingQueue<M> {
@@ -281,13 +308,14 @@ impl<M: TextMessage> OutgoingQueue<M> {
     pub fn new(local: bool) -> Self {
         Self {
             queues: vec![Queue::new(DEFAULT_PERIOD_MS)],
-            id_map: HashMap::new(),
+            id_map: IdMap::default(),
             total_size: 0,
             last_send_ms: 0,
             time_offset_us: 0,
             last_set_period: DEFAULT_PERIOD_MS,
             last_set_period_queue_index: 0,
             local,
+            scratch: Vec::new(),
         }
     }
 
@@ -395,7 +423,8 @@ impl<M: TextMessage> OutgoingQueue<M> {
         match mode {
             SendMode::Disabled => {}
             SendMode::Immediate => {
-                wire.send_binary(&self.encode_value(id, time_us, value));
+                encode_value(&mut self.scratch, self.time_offset_us, id, time_us, value);
+                wire.send_binary(&self.scratch);
             }
             SendMode::All => self.append_value(id, time_us, value),
             SendMode::Normal => {
@@ -475,7 +504,8 @@ impl<M: TextMessage> OutgoingQueue<M> {
                 let e = &queue.msgs[written];
                 unsent = match &e.item {
                     Item::Value { time_us, value } => {
-                        wire.write_binary(&encode_value(offset, e.id, *time_us, value))
+                        encode_value(&mut self.scratch, offset, e.id, *time_us, value);
+                        wire.write_binary(&self.scratch)
                     }
                     Item::Text(m) => wire.write_text(&encode_text(m)),
                 };
@@ -523,10 +553,6 @@ impl<M: TextMessage> OutgoingQueue<M> {
     pub fn is_empty(&self) -> bool {
         self.queues.iter().all(|q| q.msgs.is_empty())
     }
-
-    fn encode_value(&self, id: i32, time_us: i64, value: &Value) -> Vec<u8> {
-        encode_value(self.time_offset_us, id, time_us, value)
-    }
 }
 
 fn encode_text<M: TextMessage>(m: &M) -> String {
@@ -535,7 +561,9 @@ fn encode_text<M: TextMessage>(m: &M) -> String {
     s
 }
 
-fn encode_value(offset_us: i64, id: i32, time_us: i64, value: &Value) -> Vec<u8> {
+/// Encode one value message into `out` (cleared first), adding the time
+/// offset to its timestamp.
+fn encode_value(out: &mut Vec<u8>, offset_us: i64, id: i32, time_us: i64, value: &Value) {
     let mut timestamp_us = time_us;
     if timestamp_us != 0 {
         timestamp_us = timestamp_us.wrapping_add(offset_us);
@@ -544,14 +572,6 @@ fn encode_value(offset_us: i64, id: i32, time_us: i64, value: &Value) -> Vec<u8>
             timestamp_us = 1;
         }
     }
-    let mut out = Vec::new();
-    encode_binary(
-        &mut out,
-        &BinaryMessage {
-            id,
-            timestamp_us,
-            value: value.clone(),
-        },
-    );
-    out
+    out.clear();
+    encode_binary_parts(out, id, timestamp_us, value);
 }

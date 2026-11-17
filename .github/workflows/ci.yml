@@ -155,7 +155,12 @@ jobs:
             echo "::notice::The base branch has no crates/nt4-perf yet; nothing to compare."
           fi
       - name: Benchmark this PR
-        run: cargo bench -p nt4-perf --bench hot_paths -- --save-baseline=pr
+        # The base was built into the same target directory, and Cargo then
+        # treats these packages as fresh: without the clean this step reruns
+        # the base's binary. (The saved baselines in target/gungraun stay.)
+        run: |
+          cargo clean --release -p nt4-proto -p nt4-core -p nt4-perf
+          cargo bench -p nt4-perf --bench hot_paths -- --save-baseline=pr
       - name: Compare with the base (warn over 10%, fail over 50%)
         if: steps.base.outputs.have == 'true'
         run: |
