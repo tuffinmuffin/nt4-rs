@@ -12,7 +12,7 @@ keywords = ["frc", "networktables", "wpilib", "nt4", "sans-io"]
 categories = ["network-programming", "science::robotics"]
 
 [dependencies]
-nt4-proto = { path = "../nt4-proto", version = "0.1.0" }
+nt4-proto = { path = "../nt4-proto", version = "0.2.0" }
 serde_json.workspace = true
 thiserror.workspace = true
 

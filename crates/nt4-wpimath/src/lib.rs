@@ -18,207 +18,154 @@
 //! # let _ = pose;
 //! ```
 
-use std::borrow::Cow;
-
-use nt4::structs::{NtStruct, StructField, StructReader};
+use nt4::structs::NtStruct;
 
 // Compile and run the code in README.md as doc tests.
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
 struct ReadmeDoctests;
 
-/// Implements [`NtStruct`] for a struct whose fields are all
-/// [`StructField`]s, in order.
-macro_rules! wpi_struct {
-    (
-        $(#[$meta:meta])*
-        $ty:ident, $schema:literal, [$($nested:ty),*],
-        { $($(#[$fmeta:meta])* $field:ident: $fty:ty),* $(,)? }
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Default)]
-        pub struct $ty {
-            $($(#[$fmeta])* pub $field: $fty),*
-        }
-
-        impl NtStruct for $ty {
-            const SIZE: usize = 0 $(+ <$fty as StructField>::SIZE)*;
-            fn type_name() -> Cow<'static, str> {
-                Cow::Borrowed(stringify!($ty))
-            }
-            fn schema() -> Cow<'static, str> {
-                Cow::Borrowed($schema)
-            }
-            fn pack(&self, out: &mut Vec<u8>) {
-                $(StructField::pack(&self.$field, out);)*
-            }
-            fn unpack(data: &[u8]) -> Self {
-                let mut r = StructReader::new(data);
-                Self { $($field: r.read()),* }
-            }
-            fn for_each_nested(f: &mut dyn FnMut(&str, &str)) {
-                let _ = &f;
-                $(<$nested as NtStruct>::for_each_struct_schema(f);)*
-            }
-        }
-    };
+/// A 2D position (`Translation2d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Translation2d {
+    /// Meters.
+    pub x: f64,
+    /// Meters.
+    pub y: f64,
 }
 
-wpi_struct!(
-    /// A 2D position (`Translation2d`).
-    Translation2d, "double x;double y", [], {
-        /// Meters.
-        x: f64,
-        /// Meters.
-        y: f64,
-    }
-);
+/// A 2D rotation (`Rotation2d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Rotation2d {
+    /// Radians, counterclockwise.
+    pub value: f64,
+}
 
-wpi_struct!(
-    /// A 2D rotation (`Rotation2d`).
-    Rotation2d, "double value", [], {
-        /// Radians, counterclockwise.
-        value: f64,
-    }
-);
+/// A 2D position and heading (`Pose2d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Pose2d {
+    /// Position.
+    pub translation: Translation2d,
+    /// Heading.
+    pub rotation: Rotation2d,
+}
 
-wpi_struct!(
-    /// A 2D position and heading (`Pose2d`).
-    Pose2d, "Translation2d translation;Rotation2d rotation", [Translation2d, Rotation2d], {
-        /// Position.
-        translation: Translation2d,
-        /// Heading.
-        rotation: Rotation2d,
-    }
-);
+/// A 2D change of pose (`Transform2d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Transform2d {
+    /// Change in position.
+    pub translation: Translation2d,
+    /// Change in heading.
+    pub rotation: Rotation2d,
+}
 
-wpi_struct!(
-    /// A 2D change of pose (`Transform2d`).
-    Transform2d, "Translation2d translation;Rotation2d rotation", [Translation2d, Rotation2d], {
-        /// Change in position.
-        translation: Translation2d,
-        /// Change in heading.
-        rotation: Rotation2d,
-    }
-);
+/// A 2D motion along an arc (`Twist2d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Twist2d {
+    /// Meters forward.
+    pub dx: f64,
+    /// Meters left.
+    pub dy: f64,
+    /// Radians.
+    pub dtheta: f64,
+}
 
-wpi_struct!(
-    /// A 2D motion along an arc (`Twist2d`).
-    Twist2d, "double dx;double dy;double dtheta", [], {
-        /// Meters forward.
-        dx: f64,
-        /// Meters left.
-        dy: f64,
-        /// Radians.
-        dtheta: f64,
-    }
-);
+/// A 3D position (`Translation3d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Translation3d {
+    /// Meters.
+    pub x: f64,
+    /// Meters.
+    pub y: f64,
+    /// Meters.
+    pub z: f64,
+}
 
-wpi_struct!(
-    /// A 3D position (`Translation3d`).
-    Translation3d, "double x;double y;double z", [], {
-        /// Meters.
-        x: f64,
-        /// Meters.
-        y: f64,
-        /// Meters.
-        z: f64,
-    }
-);
+/// A quaternion (`Quaternion`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Quaternion {
+    /// Real part.
+    pub w: f64,
+    /// i part.
+    pub x: f64,
+    /// j part.
+    pub y: f64,
+    /// k part.
+    pub z: f64,
+}
 
-wpi_struct!(
-    /// A quaternion (`Quaternion`).
-    Quaternion, "double w;double x;double y;double z", [], {
-        /// Real part.
-        w: f64,
-        /// i part.
-        x: f64,
-        /// j part.
-        y: f64,
-        /// k part.
-        z: f64,
-    }
-);
+/// A 3D rotation (`Rotation3d`), as a unit quaternion.
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Rotation3d {
+    /// The rotation.
+    pub q: Quaternion,
+}
 
-wpi_struct!(
-    /// A 3D rotation (`Rotation3d`), as a unit quaternion.
-    Rotation3d, "Quaternion q", [Quaternion], {
-        /// The rotation.
-        q: Quaternion,
-    }
-);
+/// A 3D position and orientation (`Pose3d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Pose3d {
+    /// Position.
+    pub translation: Translation3d,
+    /// Orientation.
+    pub rotation: Rotation3d,
+}
 
-wpi_struct!(
-    /// A 3D position and orientation (`Pose3d`).
-    Pose3d, "Translation3d translation;Rotation3d rotation", [Translation3d, Rotation3d], {
-        /// Position.
-        translation: Translation3d,
-        /// Orientation.
-        rotation: Rotation3d,
-    }
-);
+/// A 3D change of pose (`Transform3d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Transform3d {
+    /// Change in position.
+    pub translation: Translation3d,
+    /// Change in orientation.
+    pub rotation: Rotation3d,
+}
 
-wpi_struct!(
-    /// A 3D change of pose (`Transform3d`).
-    Transform3d, "Translation3d translation;Rotation3d rotation", [Translation3d, Rotation3d], {
-        /// Change in position.
-        translation: Translation3d,
-        /// Change in orientation.
-        rotation: Rotation3d,
-    }
-);
+/// A 3D motion along an arc (`Twist3d`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct Twist3d {
+    /// Meters.
+    pub dx: f64,
+    /// Meters.
+    pub dy: f64,
+    /// Meters.
+    pub dz: f64,
+    /// Radians about x.
+    pub rx: f64,
+    /// Radians about y.
+    pub ry: f64,
+    /// Radians about z.
+    pub rz: f64,
+}
 
-wpi_struct!(
-    /// A 3D motion along an arc (`Twist3d`).
-    Twist3d, "double dx;double dy;double dz;double rx;double ry;double rz", [], {
-        /// Meters.
-        dx: f64,
-        /// Meters.
-        dy: f64,
-        /// Meters.
-        dz: f64,
-        /// Radians about x.
-        rx: f64,
-        /// Radians about y.
-        ry: f64,
-        /// Radians about z.
-        rz: f64,
-    }
-);
+/// Robot-relative chassis velocities (`ChassisVelocities`, called
+/// `ChassisSpeeds` before 2027).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct ChassisVelocities {
+    /// Meters per second forward.
+    pub vx: f64,
+    /// Meters per second left.
+    pub vy: f64,
+    /// Radians per second counterclockwise.
+    pub omega: f64,
+}
 
-wpi_struct!(
-    /// Robot-relative chassis velocities (`ChassisVelocities`, called
-    /// `ChassisSpeeds` before 2027).
-    ChassisVelocities, "double vx;double vy;double omega", [], {
-        /// Meters per second forward.
-        vx: f64,
-        /// Meters per second left.
-        vy: f64,
-        /// Radians per second counterclockwise.
-        omega: f64,
-    }
-);
+/// A swerve module's distance and angle (`SwerveModulePosition`).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct SwerveModulePosition {
+    /// Meters driven.
+    pub distance: f64,
+    /// Module angle.
+    pub angle: Rotation2d,
+}
 
-wpi_struct!(
-    /// A swerve module's distance and angle (`SwerveModulePosition`).
-    SwerveModulePosition, "double distance;Rotation2d angle", [Rotation2d], {
-        /// Meters driven.
-        distance: f64,
-        /// Module angle.
-        angle: Rotation2d,
-    }
-);
-
-wpi_struct!(
-    /// A swerve module's velocity and angle (`SwerveModuleVelocity`,
-    /// called `SwerveModuleState` before 2027).
-    SwerveModuleVelocity, "double velocity;Rotation2d angle", [Rotation2d], {
-        /// Meters per second.
-        velocity: f64,
-        /// Module angle.
-        angle: Rotation2d,
-    }
-);
+/// A swerve module's velocity and angle (`SwerveModuleVelocity`,
+/// called `SwerveModuleState` before 2027).
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+pub struct SwerveModuleVelocity {
+    /// Meters per second.
+    pub velocity: f64,
+    /// Module angle.
+    pub angle: Rotation2d,
+}
 
 #[cfg(test)]
 mod tests {
@@ -242,6 +189,79 @@ mod tests {
         check::<ChassisVelocities>().unwrap();
         check::<SwerveModulePosition>().unwrap();
         check::<SwerveModuleVelocity>().unwrap();
+    }
+
+    #[test]
+    fn schemas_match_wpimath() {
+        // GetSchema() in wpimath's *Struct.hpp at the pinned allwpilib
+        // commit, copied by hand. (The derive builds ours from the fields.)
+        let cases = [
+            (
+                "Translation2d",
+                Translation2d::schema(),
+                "double x;double y",
+            ),
+            ("Rotation2d", Rotation2d::schema(), "double value"),
+            (
+                "Pose2d",
+                Pose2d::schema(),
+                "Translation2d translation;Rotation2d rotation",
+            ),
+            (
+                "Transform2d",
+                Transform2d::schema(),
+                "Translation2d translation;Rotation2d rotation",
+            ),
+            (
+                "Twist2d",
+                Twist2d::schema(),
+                "double dx;double dy;double dtheta",
+            ),
+            (
+                "Translation3d",
+                Translation3d::schema(),
+                "double x;double y;double z",
+            ),
+            (
+                "Quaternion",
+                Quaternion::schema(),
+                "double w;double x;double y;double z",
+            ),
+            ("Rotation3d", Rotation3d::schema(), "Quaternion q"),
+            (
+                "Pose3d",
+                Pose3d::schema(),
+                "Translation3d translation;Rotation3d rotation",
+            ),
+            (
+                "Transform3d",
+                Transform3d::schema(),
+                "Translation3d translation;Rotation3d rotation",
+            ),
+            (
+                "Twist3d",
+                Twist3d::schema(),
+                "double dx;double dy;double dz;double rx;double ry;double rz",
+            ),
+            (
+                "ChassisVelocities",
+                ChassisVelocities::schema(),
+                "double vx;double vy;double omega",
+            ),
+            (
+                "SwerveModulePosition",
+                SwerveModulePosition::schema(),
+                "double distance;Rotation2d angle",
+            ),
+            (
+                "SwerveModuleVelocity",
+                SwerveModuleVelocity::schema(),
+                "double velocity;Rotation2d angle",
+            ),
+        ];
+        for (name, ours, wpimath) in cases {
+            assert_eq!(ours, wpimath, "{name}");
+        }
     }
 
     #[test]

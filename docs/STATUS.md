@@ -13,7 +13,7 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 | 3 | `nt4`: tokio `Client`, typed publishers and subscribers, pyntcore interop tests, load benchmark, decoder fuzzer, crates.io readiness | Merged (PRs #3 to #7) |
 | 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | Merged (PR #8) |
 | 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | Merged (PR #9) |
-| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); release not started |
+| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); 0.1.0 published 2026-11-16 |
 
 ## Milestone 4: `ServerCore`
 
@@ -300,7 +300,8 @@ check is enough.
    the `struct_topic` example against the server for
    `struct:SwerveModuleVelocity[]`), Elastic's Field widget, and a robot
    on a real network.
-2. **Release 0.1.0** (decided 2026-11-16: publish to crates.io as
+2. **Release 0.1.0**: done. Published to crates.io on 2026-11-16 (tag
+   `v0.1.0`, release run 44014020866). (Decided 2026-11-16: publish to crates.io as
    `nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath`, the names they have
    now, each marked unofficial in its description and README). Done
    before tagging: `NtStruct`'s name and schema became functions, so
@@ -312,25 +313,36 @@ check is enough.
    "Releasing" in README.md), with the `Deploy` environment's
    `CARGO_REGISTRY_TOKEN`.
 3. **0.2.0, in this order:**
-   1. `#[derive(NtStruct)]` in a new `nt4-derive` proc-macro crate
-      (`syn` / `quote`), re-exported by `nt4` behind a `derive` feature,
-      like Java's `StructGenerator.genRecord`. It generates what
-      `wpi_struct!` does now, plus the schema string and the nested
-      schema list from the fields, so neither can drift. For that,
-      `StructField` gains `schema_field(name)` (`double x`, `double x[4]`,
-      `Rotation2d x`) and `for_each_struct_schema`, both with defaults so
-      it isn't a breaking change. Attributes: `#[nt4(name = "..")]` for a
-      WPILib type name that isn't the Rust name (the three
-      `TrapezoidProfileConstraints*`), `#[nt4(schema = "..")]` to write a
-      schema exactly. Fieldless enums become `enum {A=0,B=1} int8
-      variant`, as Java's `StructGenerator.genEnum` writes them. Bit
-      fields come later; `ControlWord`, the only WPILib type with them,
-      stays hand-written. Tests: derived and hand-written versions of a
-      struct give the same bytes and schemas, `check::<T>()` on every
-      derived type, and clear errors for tuple structs, generics and
-      unsupported field types.
-   2. `nt4-wpimath`'s `wpi_struct!` types move to the derive, and the
-      macro goes.
+   1. `#[derive(NtStruct)]`: done on `claude/derive-ntstruct`. New
+      `nt4-derive` crate (syn 2 / quote), re-exported as
+      `nt4::structs::NtStruct` behind `nt4`'s `derive` feature. Structs
+      with named fields get the schema (`double x`, `int16 raw[4]`,
+      `Rotation2d angle`, as wpimath's C++ schemas write them) and the
+      nested schema list (each type once, in first-use order) from the
+      fields; fieldless enums become `enum {A=0,B=1} int8 variant` with the
+      Rust discriminants (int8 range; an unknown byte unpacks as the
+      enum's `Default`). Options `name`, `schema`, `crate`. `StructField`
+      gained `schema_field(name) -> Option<String>` and
+      `for_each_field_schema` (defaults: `None`, nothing). The second is
+      not named `for_each_struct_schema` as planned: `NtStruct` has that
+      name and every `NtStruct` is a `StructField`, so calls such as
+      `Pose3d::for_each_struct_schema` would have become ambiguous, a
+      breaking change. Generated code goes through
+      `nt4::structs::__private` (hidden). Tests: `nt4/tests/derive.rs`
+      (derived against the hand-written `wpi_types`, every field type,
+      enums, options, hygiene) and `nt4-derive`'s unit tests for each
+      refused input; a non-`StructField` field type gets an
+      `on_unimplemented` message. Differences from Java's
+      `StructGenerator`: no trailing `;` and `double`, not `float64`
+      (matching wpimath's C++ schemas), and enum values are the Rust
+      discriminants rather than ordinals.
+   2. `nt4-wpimath`'s types use the derive and `wpi_struct!` is gone
+      (same branch). `schemas_match_wpimath` keeps the hand-copied
+      wpimath schemas as the expected values until the audit (next) reads
+      them from allwpilib. The workspace is at 0.2.0 already: once
+      `nt4-wpimath` needs `nt4`'s new feature, `cargo publish --dry-run`
+      checks it against 0.1.0 on crates.io and fails until the version
+      moves past it.
    3. A schema audit next to `scripts/upstream_audit.py`: pull every
       `GetTypeName()` / `GetSchema()` from wpimath's `*Struct.hpp` (plus
       Java-only ones such as HAL's `ControlWord`) at `ALLWPILIB_COMMIT`,
@@ -350,11 +362,14 @@ check is enough.
       fields and an enum).
    5. A weekly CI job that runs both audits against allwpilib's newest
       release and opens an issue when something changed.
-   6. Releases: once 0.1.0 is on crates.io, switch the release workflow
+   6. Releases: 0.1.0 is on crates.io, so the release workflow can move
       to crates.io trusted publishing (`rust-lang/crates-io-auth-action`,
       a short-lived token per run; set up under each crate's settings on
-      crates.io for this repo, `release.yml` and the `Deploy` environment)
-      and delete the long-lived `CARGO_REGISTRY_TOKEN`.
+      crates.io for this repo, `release.yml` and the `Deploy` environment).
+      But `nt4-derive` is new in 0.2.0, and trusted publishing can only be
+      set up for a crate that already exists, so 0.2.0 still publishes
+      with `CARGO_REGISTRY_TOKEN`. Switch after 0.2.0, then delete the
+      token.
 4. **Report the ntcore bugs to allwpilib** (side todo, tracked
    separately; notes in `docs/UPSTREAM_BUGS.md`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale

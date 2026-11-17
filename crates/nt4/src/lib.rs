@@ -8,7 +8,8 @@
 //! with the same typed handles for the server's own topics.
 //!
 //! Struct and protobuf topics (`struct:Pose2d`, ...) are typed too:
-//! implement [`NtStruct`] or [`NtProtobuf`], or use the WPILib types in
+//! implement [`NtStruct`] (or derive it, with the `derive` feature) or
+//! [`NtProtobuf`], or use the WPILib types in
 //! the [`nt4-wpimath`](https://docs.rs/nt4-wpimath) crate. Publishing one registers its schemas under `/.schema/`, as
 //! ntcore does; see [`structs`].
 //!

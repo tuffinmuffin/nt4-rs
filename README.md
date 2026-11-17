@@ -13,14 +13,15 @@ MessagePack binary frames for values. The protocol is described in
 
 ## Status
 
-Client and server are done and tested against ntcore; the first release
-(0.1) is being prepared. Current state and next steps are in
+Client and server are done and tested against ntcore; 0.1 is on
+crates.io and 0.2 is in progress. Current state and next steps are in
 [docs/STATUS.md](docs/STATUS.md).
 
 | Crate | What it does |
 | --- | --- |
 | [`nt4`](crates/nt4) | The library most programs want: tokio client (`client` feature, on by default) and server (`server` feature), typed topics and structs |
 | [`nt4-wpimath`](crates/nt4-wpimath) | WPILib's wpimath types (`Pose2d`, `Pose3d`, swerve module states, ...) as struct topics for `nt4` |
+| [`nt4-derive`](crates/nt4-derive) | `#[derive(NtStruct)]`, used through `nt4`'s `derive` feature |
 | [`nt4-core`](crates/nt4-core) | Building block: client and server state machines with no sockets or clock (sans-I/O), for other runtimes and WASM |
 | [`nt4-proto`](crates/nt4-proto) | Building block: JSON and MessagePack encode and decode, value and type definitions, struct schemas. No I/O |
 
@@ -94,12 +95,15 @@ no clock, so it can be driven from any runtime or from WASM.
 
 ## Releasing
 
-The four crates share one version (workspace `version`) and are published
+The five crates share one version (workspace `version`) and are published
 together, by CI, when a version tag is pushed:
 
 1. In a PR: bump `version` in the root `Cargo.toml` and on each
-   `nt4-proto` / `nt4-core` / `nt4` path dependency, and rename
+   `nt4-proto` / `nt4-core` / `nt4-derive` / `nt4` path dependency, and rename
    `CHANGELOG.md`'s `Unreleased` section to `<version> (<date>)`. Merge it.
+   (The bump can come earlier: once one crate needs an unreleased change in
+   another, CI's `cargo publish --dry-run` fails until the version is past
+   the one on crates.io. 0.2.0 was bumped that way, with the derive.)
 2. Tag the merge commit on `main` and push the tag:
    ```bash
    git fetch origin && git tag v0.1.0 origin/main && git push origin v0.1.0
@@ -107,7 +111,7 @@ together, by CI, when a version tag is pushed:
 3. The `Release` workflow (`.github/workflows/release.yml`) checks that the
    tag matches the crates' version, that the commit is on `main` with CI
    passed, and that the changelog has the section. Then it publishes
-   `nt4-proto`, `nt4-core`, `nt4` and `nt4-wpimath` in that order with the
+   `nt4-proto`, `nt4-core`, `nt4-derive`, `nt4` and `nt4-wpimath` in that order with the
    `Deploy` environment's `CARGO_REGISTRY_TOKEN`, and creates the GitHub
    release from the changelog section.
 
