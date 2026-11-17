@@ -167,6 +167,43 @@ directions, and that we read ntcore's struct topics typed and through
 their schemas. The fuzzer also feeds every input to the schema parser and
 the dynamic views.
 
+## PhotonVision (`nt4-photon`)
+
+Decided 2026-11-16, after dumping what a real robot publishes (Raptacon's
+Robot-2026 in the simulator, 457 topics): the WPILib struct types it uses
+are all in nt4-wpimath, and the one structured type it lacked was
+PhotonVision's result, which vision code on a coprocessor or dashboard is
+likely to need.
+
+PhotonVision sends each frame on `/photonvision/<camera>/rawBytes`, typed
+`photonstruct:PhotonPipelineResult:<md5 of the format>`, in its own
+format: WPILib's packed struct layout plus lists (a count byte) and
+optionals (a flag byte). Its server and Java simulation publish the
+schemas on `/.schema/photonstruct:*` (type `photonstructschema`) and set a
+`message_uuid` property; the C++ and Python simulations set only the
+property. Checked on the wire: PhotonVision `dev-v2027.0.0-alpha-2-89`
+(linuxarm64 jar, Java 25) in test mode (`-t -n`, its 2026 field image as
+the camera) in the Ubuntu VM, pointed at nt4's `server` example
+(`POST /api/settings/general` with `ntServerAddress: "localhost"`).
+
+`crates/nt4-photon` (not published yet; see next steps) has the six
+message types at the 2027 format
+(`fd353b11...`, timestamps in nanoseconds; the 2027 alpha-2 release still
+has 2026's `4b2ff16a...`). Decoding follows PhotonVision's Java `Packet`
+(a boolean is true only for 1, trailing bytes ignored) except that
+truncated data and counts over 127 are refused, where Java reads zeros or
+a negative count. `PhotonPipelineResult` is an `NtValue`; publishing it
+registers the schemas in `PacketPublisher`'s order and sets
+`message_uuid`, through the new `NtValue::properties()`. Tests: a real
+1210-byte result from that run decodes to the best target PhotonVision
+published on `targetYaw` / `targetPitch` / `targetArea` / `targetPose`
+and encodes back to the same bytes; our formats are the schemas it
+published, and each hash is the MD5 of its format; a result published
+through nt4 has PhotonVision's type, property and schema topics. The
+`photon_watch` example decoded the live stream (four tags, about 27 ms
+capture to publish). Not covered live: the multi-tag result (the test
+pipeline doesn't solve one; unit tests cover the optional).
+
 ## What PR #3 found
 
 The load benchmark (`bench/`, results in `bench/README.md`) runs nt4 and
@@ -408,13 +445,37 @@ check is enough.
       set up for a crate that already exists, so 0.2.0 still publishes
       with `CARGO_REGISTRY_TOKEN`. Switch after 0.2.0, then delete the
       token.
-4. **Report the ntcore bugs to allwpilib** (side todo, tracked
+4. **`nt4-photon`, before publishing it** (it is `publish = false` and
+   out of `release.yml`'s `CRATES`; nt4 and the other crates don't need
+   it):
+   1. A CI workflow, weekly, by hand, and on PRs touching `nt4-photon`:
+      download PhotonVision's linux x86-64 jar, Java 25
+      (`actions/setup-java`), the test image
+      (`test-resources/testimages/2026/BlueOutpostFuelSpread.jpg`); start
+      nt4's `server` example on 5810 and `java -jar photonvision.jar -t -n`;
+      point it at localhost (`POST :5800/api/settings/general`,
+      `ntServerAddress: "localhost"`, `connectionType: 0`); then a checker
+      (an extended `photon_watch` example) checks the topic type and
+      `message_uuid` against our hash, the `/.schema/photonstruct:*`
+      topics against our formats, that results decode to the best target
+      on `targetYaw` / `targetPitch` / `targetPose`, and that they encode
+      back to the same bytes. Run it against two builds: the `Dev`
+      release (PhotonVision `main`) must pass, since it is the format we
+      claim; the newest release is informational until 2027 ships, then
+      the required one (with `Dev` as the early warning). On the schedule,
+      a mismatch opens or updates an issue naming the new hash.
+   2. A live multi-tag result (the test pipeline doesn't solve one).
+   3. Publish once PhotonVision 2027 is released with a format we match
+      and the CI job passes against it: bump the hash and fixture if it
+      moved, drop `publish = false`, add `nt4-photon` back to `CRATES`
+      after `nt4-wpimath`, and update the READMEs and CHANGELOG.
+5. **Report the ntcore bugs to allwpilib** (side todo, tracked
    separately; notes in `docs/UPSTREAM_BUGS.md`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale
    announce flag), the Windows persistent-file bug, the
    `std::array` struct schema, and two client queue-ordering bugs (a
    `setproperties` overtaking its `publish`, and a dropped flush).
-5. **nt4's cost per frame** on localhost and per published value: done in
+6. **nt4's cost per frame** on localhost and per published value: done in
    PR #13 (see the benchmark notes below). Localhost receive is now within
    about a fifth of ntcore on a 2-core VM; the rest is mostly kernel time.
    Worth rerunning `bench/` on the 4-core x86 VM the README tables came

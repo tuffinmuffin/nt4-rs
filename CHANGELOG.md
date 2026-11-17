@@ -6,6 +6,16 @@ in README.md.
 
 ## Unreleased
 
+- In the repository, not published yet: `nt4-photon`, PhotonVision pipeline results
+  (`PhotonPipelineResult`, its targets, PnP and multi-tag results) as
+  typed topics, in PhotonVision 2027's photonstruct format (hash
+  `fd353b11...`). Reads `/photonvision/<camera>/rawBytes`; publishing
+  registers the photonstruct schemas and sets `message_uuid` as
+  PhotonVision's server does. Tested against a real PhotonVision 2027 build.
+  Truncated data is refused, where PhotonVision's Java decoder reads zeros.
+- `NtValue::properties()` (default: none) gives the properties a typed
+  topic is published with; `publish` uses it.
+
 - `#[derive(NtStruct)]` (new `nt4-derive` crate; turn on `nt4`'s `derive`
   feature and use `nt4::structs::NtStruct`). For a struct with named
   fields it builds the schema and the nested schemas from the field types,
