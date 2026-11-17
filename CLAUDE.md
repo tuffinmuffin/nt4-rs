@@ -43,6 +43,13 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   code calls helpers in `nt4::structs::__private`. Tests:
   `nt4/tests/derive.rs`, plus the error cases in `nt4-derive`'s own unit
   tests.
+- `crates/nt4-photon` (`publish = false` for now): PhotonVision's photonstruct results
+  (`PhotonPipelineResult` and the types it holds), pinned to one
+  PhotonVision format hash. Decoding follows PhotonVision's Java `Packet`
+  (photon-targeting), except that short data is refused. Tests:
+  `tests/fixture.rs` decodes a real PhotonVision capture
+  (`tests/data/`), `tests/publish.rs` checks the published topic and
+  schemas against it.
 - `crates/nt4-wpimath`: the WPILib types, built only on `nt4`'s public
   traits. Their schemas must match wpimath's `*Struct.hpp` exactly;
   `scripts/schema_audit.py` checks that, and every new type goes in
