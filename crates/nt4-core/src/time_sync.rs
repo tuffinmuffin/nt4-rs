@@ -67,7 +67,7 @@ impl TimeSync {
     /// No offset known yet.
     pub fn new() -> Self {
         Self {
-            rtt2_us: i64::MAX,
+            rtt2_us: 0,
             offset_us: None,
         }
     }
@@ -118,9 +118,6 @@ impl TimeSync {
             _ => return Err(INVALID.into()),
         };
         let rtt2 = rtt / 2;
-        if rtt2 >= self.rtt2_us {
-            return Ok(None);
-        }
         let offset = reply
             .timestamp_us
             .checked_add(rtt2)

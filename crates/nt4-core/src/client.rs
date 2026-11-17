@@ -436,13 +436,21 @@ impl ClientCore {
     /// that property. Our own publishers of the topic keep the change for
     /// replay after a reconnect.
     pub fn set_properties(&mut self, name: &str, update: Properties) {
-        for p in self.publishers.values_mut().filter(|p| p.name == name) {
+        let mut queue_id = 0;
+        for (&pubuid, p) in self.publishers.iter_mut().filter(|(_, p)| p.name == name) {
             apply_update(&mut p.properties, &update);
+            queue_id = pubuid;
         }
         if let Some(conn) = &mut self.conn {
+            // ntcore queues this under id 0 (the default period's queue)
+            // while the `publish` it follows waits in the publisher's own
+            // queue. With a publisher period other than the default, both
+            // queues come due in the same send and the `setproperties` can
+            // go first, and a server then ignores it (the topic isn't
+            // published yet). Queue it behind our own `publish` instead.
             conn.outgoing.send_message(
                 &mut self.wire,
-                0,
+                queue_id,
                 ClientMessage::SetProperties {
                     name: name.to_owned(),
                     update,

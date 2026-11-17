@@ -464,6 +464,28 @@ mod tests {
     // Tests written by Claude.
     use super::*;
 
+    #[test]
+    fn default_type_announces_each_value_as_its_plain_type() {
+        let cases = [
+            (Value::Boolean(true), NtType::Boolean),
+            (Value::Double(1.0), NtType::Double),
+            (Value::Int(1), NtType::Int),
+            (Value::Float(1.0), NtType::Float),
+            (Value::String("{}".into()), NtType::String),
+            (Value::Raw(vec![1]), NtType::Raw),
+            (Value::BooleanArray(vec![true]), NtType::BooleanArray),
+            (Value::DoubleArray(vec![1.0]), NtType::DoubleArray),
+            (Value::IntArray(vec![1]), NtType::IntArray),
+            (Value::FloatArray(vec![1.0]), NtType::FloatArray),
+            (Value::StringArray(vec!["a".into()]), NtType::StringArray),
+        ];
+        for (value, ty) in cases {
+            // The announced type carries the same wire type id as the value.
+            assert_eq!(value.default_type(), ty, "{value:?}");
+            assert_eq!(ty.type_id(), value.type_id(), "{value:?}");
+        }
+    }
+
     /// The decoder this crate used before reading MessagePack directly: rmpv
     /// builds a generic tree, then it is converted. Kept as the reference the
     /// direct decoder must agree with.

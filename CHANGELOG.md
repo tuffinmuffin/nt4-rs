@@ -53,5 +53,11 @@ First release.
   before every read, and the client and server connection loops handle all
   frames already read under one lock, keep one timer per connection instead
   of one per frame, and flush only when they sent something.
+- Two ordering bugs nt4 had copied from ntcore are fixed (found while
+  raising test coverage; both in `docs/UPSTREAM_BUGS.md`): a client's
+  `set_properties` right after `publish` could reach the server first and
+  be ignored, when the publisher's period isn't the default; and a
+  `flush()` within 5 ms of the previous send was dropped, so the value
+  waited for its publisher's period.
 - ntcore 2027 only: the interop tests, the fuzzer oracle and the benchmark
   use pyntcore 2027.0.0a8. ntcore 2026 behavior is not tracked.

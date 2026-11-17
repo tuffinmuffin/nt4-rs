@@ -523,3 +523,39 @@ fn local_queue_sends_immediately() {
     assert!(wire.text_writes.is_empty());
     assert!(wire.binary_writes.is_empty());
 }
+
+// Written by Claude, not ported. ntcore drops a flush that lands within
+// MIN_PERIOD_MS of the previous send (or while the wire is busy): the next
+// send only takes queues that are due, so a value in a slow queue waits a
+// whole period. nt4 remembers the flush for the next send.
+#[test]
+fn a_rate_limited_flush_is_kept_for_the_next_send() {
+    let mut wire = RecordingWire::default();
+    let mut queue = client_queue();
+    queue.set_period(7, 10_000);
+    queue.send_message(&mut wire, 7, publish(7, "slow"));
+    queue.send_outgoing(&mut wire, 100, false);
+    assert_eq!(wire.text_writes.len(), 1);
+
+    // Within MIN_PERIOD_MS of that send: held back.
+    queue.send_value(&mut wire, 7, 101, &Value::Double(1.0), SendMode::Normal);
+    queue.send_outgoing(&mut wire, 101, true);
+    assert!(wire.binary_writes.is_empty());
+
+    // The next send, though not a flush and long before the slow queue is
+    // due, sends it.
+    queue.send_outgoing(&mut wire, 100 + u64::from(MIN_PERIOD_MS), false);
+    assert_eq!(wire.binary_writes.len(), 1);
+    // And the flush is done: a later value waits for its period again.
+    queue.send_value(&mut wire, 7, 200, &Value::Double(2.0), SendMode::Normal);
+    queue.send_outgoing(&mut wire, 200, false);
+    assert_eq!(wire.binary_writes.len(), 1);
+
+    // Same for a flush while the wire is busy.
+    queue.send_value(&mut wire, 7, 300, &Value::Double(3.0), SendMode::Normal);
+    wire.ready = false;
+    queue.send_outgoing(&mut wire, 300, true);
+    wire.ready = true;
+    queue.send_outgoing(&mut wire, 301, false);
+    assert_eq!(wire.binary_writes.len(), 2);
+}
