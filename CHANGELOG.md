@@ -4,47 +4,48 @@ The library crates (`nt4-proto`, `nt4-core`, `nt4-derive`, `nt4`,
 `nt4-wpimath`) share one version number. Pushing the tag `v<version>` publishes them; see "Releasing"
 in README.md.
 
-## Unreleased
+## 0.2.0 (2026-11-16)
 
-- In the repository, not published yet: `nt4-photon`, PhotonVision pipeline results
-  (`PhotonPipelineResult`, its targets, PnP and multi-tag results) as
-  typed topics, in PhotonVision 2027's photonstruct format (hash
-  `fd353b11...`). Reads `/photonvision/<camera>/rawBytes`; publishing
-  registers the photonstruct schemas and sets `message_uuid` as
-  PhotonVision's server does. Tested against a real PhotonVision 2027 build.
-  Truncated data is refused, where PhotonVision's Java decoder reads zeros.
-- `NtValue::properties()` (default: none) gives the properties a typed
-  topic is published with; `publish` uses it.
-
-- `#[derive(NtStruct)]` (new `nt4-derive` crate; turn on `nt4`'s `derive`
-  feature and use `nt4::structs::NtStruct`). For a struct with named
-  fields it builds the schema and the nested schemas from the field types,
-  declared as wpimath's C++ schemas declare them, so they can't drift from
-  the layout. A fieldless enum becomes a one-byte struct,
+- `#[derive(NtStruct)]`, in the new `nt4-derive` crate: turn on `nt4`'s
+  `derive` feature and use `nt4::structs::NtStruct`. For a struct with
+  named fields it builds the schema and the nested schemas from the field
+  types, declared as wpimath's C++ schemas declare them, so they can't
+  drift from the layout. A fieldless enum becomes a one-byte struct,
   `enum {A=0,B=1} int8 variant`, as WPILib's Java `StructGenerator` writes
-  one. Options: `#[nt4(name = "..")]`, `#[nt4(schema = "..")]` and
-  `#[nt4(crate = "..")]`.
+  one. Options on the type: `#[nt4(name = "..")]`,
+  `#[nt4(schema = "..")]`, `#[nt4(nested(A, ..))]` (the nested structs, in
+  place of the fields', as `DifferentialSample` registers
+  `HolonomicSample`) and `#[nt4(crate = "..")]`; on a field,
+  `#[nt4(rename = "..")]` (its schema name, such as WPILib's camelCase
+  `xWidth`).
 - `StructField` has two new methods with defaults (not a breaking change):
   `schema_field(name)` gives a field's schema declaration (`double x`,
   `int16 raw[4]`, `Rotation2d angle`), and `for_each_field_schema` the
   schemas of the struct in a field. Using a type that isn't a
   `StructField` as a field now says so in the compiler error.
-- `nt4-wpimath`: `SwerveDriveKinematics<N>` (`struct:SwerveDriveKinematics__N`,
-  the module positions), generic over the number of modules;
-  `ChassisAccelerations`; `SwerveModuleAcceleration` (struct
-  `SwerveModuleAccelerations`, as WPILib names it); differential and
-  mecanum wheel positions, velocities and accelerations;
-  `HolonomicSample` and `DifferentialSample`; `Rectangle2d` and
-  `Ellipse2d`. The types are in modules by group (`geometry`,
-  `kinematics`, `trajectory`, `shape`), re-exported at the crate root.
-- `#[derive(NtStruct)]`: `#[nt4(rename = "..")]` on a field gives its
-  schema name (WPILib's camelCase), and `#[nt4(nested(A, ..))]` lists the
-  nested structs in place of the fields' (as `DifferentialSample`
-  registers `HolonomicSample`).
-- `nt4-wpimath`'s types use the derive; their schemas, sizes and nested
-  schema order are unchanged. `scripts/schema_audit.py`, run in CI, checks
-  them against WPILib's own struct definitions at the pinned allwpilib
-  commit.
+- `NtValue::properties()` (default: none) gives the properties a typed
+  topic is published with; `publish` uses it.
+- `nt4-wpimath`: new types `SwerveDriveKinematics<N>`
+  (`struct:SwerveDriveKinematics__N`, the module positions, generic over
+  the number of modules), `ChassisAccelerations`,
+  `SwerveModuleAcceleration` (struct `SwerveModuleAccelerations`, as
+  WPILib names it), differential and mecanum wheel positions, velocities
+  and accelerations, `HolonomicSample` and `DifferentialSample`,
+  `Rectangle2d` and `Ellipse2d`. The types are in modules by group
+  (`geometry`, `kinematics`, `trajectory`, `shape`), re-exported at the
+  crate root.
+- `nt4-wpimath`'s types are built with the derive; the existing ones'
+  schemas, sizes and nested schema order are unchanged. CI checks every
+  type against WPILib's own struct definitions (C++, Java and RobotPy) at
+  a pinned allwpilib commit, and a weekly job checks each newer allwpilib
+  release. Types WPILib has that aren't here are listed, with reasons, in
+  `scripts/schema_audit.txt`; the crate README says how to read or derive
+  them, and how to ask for one.
+- In the repository, not published yet: `nt4-photon`, PhotonVision
+  pipeline results (`PhotonPipelineResult`, its targets, PnP and
+  multi-tag results) as typed topics, in PhotonVision 2027's photonstruct
+  format (hash `fd353b11...`). It will be published once PhotonVision 2027
+  is released.
 
 ## 0.1.0 (2026-11-16)
 

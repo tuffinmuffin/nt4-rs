@@ -1,0 +1,143 @@
+name: Upstream watch
+
+# Once a week: has allwpilib released something newer than the commit we
+# pin (ALLWPILIB_COMMIT in ci.yml), and if so, do our ported tests and
+# nt4-wpimath's struct schemas still match it? A mismatch opens (or adds to)
+# one issue labelled `upstream-watch` and fails the run. See
+# scripts/upstream_audit.py and scripts/schema_audit.py.
+#
+# Only releases from 2027 on count (nt4 doesn't track ntcore 2026), and only
+# one newer than the pin: an older release lacks cases we ported from the
+# pin, which isn't news.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "allwpilib tag or commit to audit (default: the newest 2027+ release, if newer than the pin)"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the allwpilib release
+        id: pick
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          pin=$(sed -n 's/^ *ALLWPILIB_COMMIT: *//p' .github/workflows/ci.yml)
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
+          if [ -n "$REF" ]; then
+            echo "Auditing $REF, as asked."
+            echo "ref=$REF" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag=$(gh release list --repo wpilibsuite/allwpilib --exclude-drafts --limit 30 \
+            --json tagName,publishedAt \
+            --jq '[.[] | select((.tagName | ltrimstr("v") | split(".")[0] | tonumber? // 0) >= 2027)]
+                  | sort_by(.publishedAt) | last | .tagName // empty')
+          if [ -z "$tag" ]; then
+            echo "::notice::No allwpilib release from 2027 on yet."
+            exit 0
+          fi
+          # Where the release stands against the pin: "ahead" (newer),
+          # "identical", "behind" (older) or "diverged".
+          status=$(gh api "repos/wpilibsuite/allwpilib/compare/$pin...$tag" --jq .status)
+          echo "Newest release $tag is $status relative to the pin ${pin:0:10}."
+          case "$status" in
+            behind)
+              echo "::notice::$tag is older than ALLWPILIB_COMMIT; nothing new to check."
+              ;;
+            identical)
+              echo "::notice::$tag is the pinned commit; CI already checks it."
+              ;;
+            *)
+              echo "ref=$tag" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.pick.outputs.ref != ''
+      - uses: Swatinem/rust-cache@v2
+        if: steps.pick.outputs.ref != ''
+      # The newest RobotPy, not the pinned one: it is the newest compiled
+      # WPILib, for the schema audit's third comparison.
+      - uses: actions/setup-python@v5
+        if: steps.pick.outputs.ref != ''
+        with:
+          python-version: "3.13"
+      - if: steps.pick.outputs.ref != ''
+        run: python -m pip install --pre --upgrade robotpy-wpimath robotpy-hal
+
+      - name: Run both audits
+        id: audit
+        if: steps.pick.outputs.ref != ''
+        env:
+          REF: ${{ steps.pick.outputs.ref }}
+        run: |
+          scripts/fetch_allwpilib.sh allwpilib "$REF"
+          robotpy=$(pip show robotpy-wpimath | sed -n 's/^Version: //p')
+          status=0
+          {
+            echo "## allwpilib \`$REF\` against nt4"
+            echo
+            echo "Pinned: \`${{ steps.pick.outputs.pin }}\` (ALLWPILIB_COMMIT in ci.yml). RobotPy: robotpy-wpimath $robotpy."
+            echo
+            echo "### ntcore test cases (scripts/upstream_audit.py)"
+            echo
+            echo '```'
+          } > report.md
+          python scripts/upstream_audit.py allwpilib >> report.md 2>&1 || status=1
+          {
+            echo '```'
+            echo
+            echo "### Struct schemas (scripts/schema_audit.py)"
+            echo
+            echo '```'
+          } >> report.md
+          python scripts/schema_audit.py allwpilib --robotpy "$(python -c 'import sys; print(sys.executable)')" >> report.md 2>&1 || status=1
+          echo '```' >> report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          echo "failed=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the upstream-watch issue
+        if: steps.audit.outputs.failed == '1'
+        env:
+          REF: ${{ steps.pick.outputs.ref }}
+        run: |
+          gh label create upstream-watch --color c5def5 \
+            --description "allwpilib changed something nt4 follows" 2>/dev/null || true
+          {
+            echo "The weekly upstream watch found differences. To follow them: port or list the"
+            echo "new test cases (scripts/upstream_na.txt), fix or list the struct types"
+            echo "(scripts/schema_audit.txt), then bump ALLWPILIB_COMMIT in ci.yml (and the"
+            echo "ported tests' headers). Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            cat report.md
+          } > issue.md
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-watch \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --title "Upstream watch: allwpilib $REF"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label upstream-watch \
+              --title "Upstream watch: allwpilib $REF" --body-file issue.md
+          fi
+          echo "::error::allwpilib $REF differs from what nt4 follows; see the upstream-watch issue."
+          exit 1
