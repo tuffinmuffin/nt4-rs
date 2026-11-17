@@ -389,3 +389,140 @@ fn values_of_the_wrong_size_are_not_structs() {
     assert_eq!(Inner::from_value(&Value::Double(1.0)), None);
     assert_eq!(Proto::<Speed>::from_value(&Value::Raw(vec![1, 2])), None);
 }
+
+// Written by Claude: `bool` and fixed-array fields (`bool on; double xs[3]`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Flags {
+    on: bool,
+    xs: [f64; 3],
+}
+
+impl NtStruct for Flags {
+    const SIZE: usize = 1 + 3 * 8;
+    fn type_name() -> Cow<'static, str> {
+        "Flags".into()
+    }
+    fn schema() -> Cow<'static, str> {
+        "bool on; double xs[3]".into()
+    }
+    fn pack(&self, out: &mut Vec<u8>) {
+        self.on.pack(out);
+        self.xs.pack(out);
+    }
+    fn unpack(data: &[u8]) -> Self {
+        let mut r = StructReader::new(data);
+        Flags {
+            on: r.read(),
+            xs: r.read(),
+        }
+    }
+}
+
+// Written by Claude.
+#[test]
+fn bool_and_array_fields_round_trip_and_match_the_schema() {
+    nt4::structs::check::<Flags>().unwrap();
+    let flags = Flags {
+        on: true,
+        xs: [1.5, -2.0, 3.25],
+    };
+    let Value::Raw(bytes) = flags.into_value() else {
+        panic!("not raw")
+    };
+    assert_eq!(bytes.len(), <Flags as NtStruct>::SIZE);
+    assert_eq!(bytes[0], 1);
+    assert_eq!(&bytes[1..9], &1.5f64.to_le_bytes());
+    assert_eq!(Flags::from_value(&Value::Raw(bytes.clone())), Some(flags));
+
+    // The run-time decoder reads the same bytes the same way.
+    let mut db = StructDatabase::new();
+    db.add("Flags", &Flags::schema()).unwrap();
+    let s = DynamicStruct::new(&db, "Flags", &bytes).unwrap();
+    assert_eq!(s.get_bool(s.field("on").unwrap(), 0), Some(true));
+    let xs = s.field("xs").unwrap();
+    assert_eq!(s.get_double(xs, 2), Some(3.25));
+}
+
+/// A struct whose `NtStruct` impl is wrong in one way, for `check`.
+macro_rules! broken {
+    ($name:ident, size: $size:expr, schema: $schema:expr, packs: $packs:expr, nested: $nested:expr) => {
+        #[derive(Clone, Default)]
+        struct $name;
+        impl NtStruct for $name {
+            const SIZE: usize = $size;
+            fn type_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+            fn schema() -> Cow<'static, str> {
+                $schema.into()
+            }
+            fn pack(&self, out: &mut Vec<u8>) {
+                out.extend(std::iter::repeat_n(0, $packs));
+            }
+            fn unpack(_: &[u8]) -> Self {
+                $name
+            }
+            fn for_each_nested(f: &mut dyn FnMut(&str, &str)) {
+                if $nested {
+                    Inner::for_each_struct_schema(f);
+                }
+            }
+        }
+    };
+}
+
+broken!(BadSyntax, size: 4, schema: "int32 a b", packs: 4, nested: false);
+broken!(WrongSize, size: 5, schema: "int32 a", packs: 5, nested: false);
+broken!(PacksWrong, size: 4, schema: "int32 a", packs: 3, nested: false);
+broken!(NoNested, size: 8, schema: "Inner i", packs: 8, nested: false);
+broken!(WithNested, size: 8, schema: "Inner i", packs: 8, nested: true);
+
+// Written by Claude: `check` catches each kind of mistake in a hand-written
+// `NtStruct` impl before it reaches a dashboard.
+#[test]
+fn check_finds_mistakes_in_struct_impls() {
+    use nt4::structs::check;
+    let err = check::<BadSyntax>().unwrap_err();
+    assert!(err.starts_with("struct:BadSyntax: "), "{err}");
+    assert_eq!(
+        check::<WrongSize>().unwrap_err(),
+        "schema is 4 bytes, SIZE is 5"
+    );
+    assert_eq!(
+        check::<PacksWrong>().unwrap_err(),
+        "pack wrote 3 bytes, SIZE is 4"
+    );
+    assert_eq!(
+        check::<NoNested>().unwrap_err(),
+        "NoNested: a nested schema is missing"
+    );
+    check::<WithNested>().unwrap();
+}
+
+// Written by Claude.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Empty;
+
+impl NtStruct for Empty {
+    const SIZE: usize = 0;
+    fn type_name() -> Cow<'static, str> {
+        "Empty".into()
+    }
+    fn schema() -> Cow<'static, str> {
+        "".into()
+    }
+    fn pack(&self, _: &mut Vec<u8>) {}
+    fn unpack(_: &[u8]) -> Self {
+        Empty
+    }
+}
+
+// Written by Claude.
+#[test]
+fn struct_arrays_reject_other_types_and_handle_empty_structs() {
+    assert_eq!(<Vec<Inner>>::from_value(&Value::Double(1.0)), None);
+    assert_eq!(Proto::<Speed>::from_value(&Value::Int(1)), None);
+    // A zero-size struct: only an empty value is a (zero-length) array.
+    assert_eq!(<Vec<Empty>>::from_value(&Value::Raw(vec![])), Some(vec![]));
+    assert_eq!(<Vec<Empty>>::from_value(&Value::Raw(vec![0])), None);
+}

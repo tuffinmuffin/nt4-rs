@@ -265,3 +265,200 @@ async fn plain_http_is_answered_like_ntcore() {
     let c = client(&server, "after-http");
     eventually(|| c.is_connected().then_some(())).await;
 }
+
+// Requests that aren't HTTP at all: wpinet closes the connection without an
+// answer, and so do we.
+#[tokio::test(flavor = "multi_thread")]
+async fn requests_that_are_not_http_are_closed_unanswered() {
+    let server = server().await;
+    // Not a request line.
+    assert_eq!(http(&server, "hello there\r\n\r\n").await, "");
+    // A head larger than we read before giving up, with no end in sight.
+    // The server stops reading partway, so the write itself may fail.
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut tcp = tokio::net::TcpStream::connect(server.local_addr())
+            .await
+            .unwrap();
+        let huge = format!("GET / HTTP/1.1\r\nX: {}\r\n", "a".repeat(64 * 1024));
+        let _ = tcp.write_all(huge.as_bytes()).await;
+        let mut out = Vec::new();
+        let read = tokio::time::timeout(Duration::from_secs(5), tcp.read_to_end(&mut out))
+            .await
+            .expect("not closed within 5 s");
+        // Closed (possibly reset, since we were still writing), unanswered.
+        assert!(
+            read.is_err() || out.is_empty(),
+            "{:?}",
+            String::from_utf8_lossy(&out)
+        );
+    }
+    // A target that isn't a path is a 400.
+    let bad = http(&server, "GET nope HTTP/1.1\r\n\r\n").await;
+    assert!(bad.starts_with("HTTP/1.1 400 Bad Request\r\n"), "{bad}");
+    // An absolute-form target is answered by its path.
+    let absolute = http(&server, "GET http://robot:5810/ HTTP/1.1\r\n\r\n").await;
+    assert!(absolute.starts_with("HTTP/1.1 200 OK\r\n"), "{absolute}");
+    // The server is still fine.
+    let c = client(&server, "after-garbage");
+    eventually(|| c.is_connected().then_some(())).await;
+}
+
+fn rtt_ping(value: i64) -> Message {
+    let mut out = Vec::new();
+    encode_binary(
+        &mut out,
+        &BinaryMessage {
+            id: -1,
+            timestamp_us: 0,
+            value: Value::Int(value),
+        },
+    );
+    Message::Binary(out.into())
+}
+
+async fn raw_connect(server: &Server, path: &str, protocol: &'static str) -> RawWs {
+    let url = format!("ws://{}/nt/{path}", server.local_addr());
+    let mut req = url.into_client_request().unwrap();
+    req.headers_mut()
+        .insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(protocol));
+    tokio_tungstenite::connect_async(req).await.unwrap().0
+}
+
+type RawWs =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// The next frame that isn't a message or the server's own keepalive ping
+/// (a pong, a close, or the end), within 5 s.
+async fn next_control(ws: &mut RawWs) -> Option<Message> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Text(_) | Message::Binary(_) | Message::Ping(_))) => {}
+                other => return other.and_then(Result::ok),
+            }
+        }
+    })
+    .await
+    .expect("nothing within 5 s")
+}
+
+const RTT: &str = "rtt.networktables.first.wpi.edu";
+const NT41: &str = "v4.1.networktables.first.wpi.edu";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rtt_connection_answers_websocket_pings_and_closes_on_bad_frames() {
+    let server = server().await;
+    let mut ws = raw_connect(&server, "rtt", RTT).await;
+    // A WebSocket ping gets a pong, and RTT pings keep working after it.
+    ws.send(Message::Ping(b"p".to_vec().into())).await.unwrap();
+    assert!(matches!(next_control(&mut ws).await, Some(Message::Pong(p)) if &p[..] == b"p"));
+    ws.send(rtt_ping(5)).await.unwrap();
+    let Some(Ok(Message::Binary(reply))) = ws.next().await else {
+        panic!("no RTT reply")
+    };
+    assert_eq!(
+        BinaryReader::new(&reply).next().unwrap().unwrap().value,
+        Value::Int(5)
+    );
+
+    // As ntcore: a frame that doesn't decode ends the connection.
+    ws.send(Message::Binary(vec![0xc1].into())).await.unwrap();
+    assert!(matches!(
+        next_control(&mut ws).await,
+        Some(Message::Close(_)) | None
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_the_server_closes_rtt_connections() {
+    let server = server().await;
+    let mut ws = raw_connect(&server, "rtt", RTT).await;
+    ws.send(rtt_ping(1)).await.unwrap();
+    assert!(matches!(ws.next().await, Some(Ok(Message::Binary(_)))));
+    drop(server);
+    assert!(matches!(
+        next_control(&mut ws).await,
+        Some(Message::Close(_)) | None
+    ));
+}
+
+// The pong to a client's ping is queued by tungstenite and only goes out on
+// a flush; the connection loop must flush even when it has nothing else to
+// send.
+#[tokio::test(flavor = "multi_thread")]
+async fn nt4_connection_answers_websocket_pings() {
+    let server = server().await;
+    let mut ws = raw_connect(&server, "pinger", NT41).await;
+    for i in 0..3u8 {
+        ws.send(Message::Ping(vec![i].into())).await.unwrap();
+        let got = next_control(&mut ws).await;
+        assert!(
+            matches!(&got, Some(Message::Pong(p)) if p[..] == [i]),
+            "ping {i}: {got:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nt4_client_sending_an_undecodable_frame_is_closed() {
+    let server = server().await;
+    let mut ws = raw_connect(&server, "garbage", NT41).await;
+    eventually(|| (server.clients().len() == 1).then_some(())).await;
+    ws.send(Message::Binary(vec![0xc1].into())).await.unwrap();
+    assert!(matches!(
+        next_control(&mut ws).await,
+        Some(Message::Close(_)) | None
+    ));
+    eventually(|| server.clients().is_empty().then_some(())).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_property_changes_and_flush_reach_clients() {
+    let server = server().await;
+    let c = client(&server, "props");
+    let mut events = c.events();
+    let _sub = c.subscribe::<i64>(
+        "/s/slow",
+        SubscriptionOptions {
+            // Far longer than the test: values arrive only when flushed.
+            periodic: Some(10.0),
+            ..Default::default()
+        },
+    );
+    assert!(c.wait_for_sync(Duration::from_secs(5)).await);
+    let p = server.publish::<i64>("/s/slow");
+    eventually(|| {
+        c.topics()
+            .iter()
+            .any(|t| &*t.name == "/s/slow")
+            .then_some(())
+    })
+    .await;
+
+    let mut update = nt4::Properties::new();
+    update.insert("cached".into(), false.into());
+    server.set_properties("/s/slow", update);
+    p.set(9);
+    server.flush();
+
+    let (mut saw_props, mut saw_value) = (false, false);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !(saw_props && saw_value) {
+            match events.recv().await.unwrap() {
+                nt4::Event::Properties { name, update, .. } if &*name == "/s/slow" => {
+                    assert_eq!(update.get("cached"), Some(&false.into()));
+                    saw_props = true;
+                }
+                nt4::Event::Value { name, value, .. } if &*name == "/s/slow" => {
+                    assert_eq!(value.value, Value::Int(9));
+                    saw_value = true;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("properties and flushed value within 5 s");
+    assert!(format!("{server:?}").contains("local_addr"));
+}

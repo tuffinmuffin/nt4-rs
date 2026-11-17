@@ -133,3 +133,52 @@ fn reconnect_measures_again() {
     client.handle_binary(5_020, &rtt_reply(5_000, 90));
     assert_eq!(client.server_time_offset(), Some(90 + 10 - 5_020));
 }
+
+// `TimeSync` on its own, without a client around it.
+#[test]
+fn time_sync_reports_the_reply_that_set_it() {
+    use nt4_core::time_sync::TimeSync;
+    let mut sync = TimeSync::default();
+    assert_eq!(sync, TimeSync::new());
+    assert_eq!((sync.offset(), sync.rtt2()), (None, None));
+
+    let reply = BinaryMessage {
+        id: -1,
+        timestamp_us: 50_000,
+        value: Value::Int(1_000),
+    };
+    let update = sync.handle_reply(1_300, &reply).unwrap().unwrap();
+    assert_eq!(update.rtt2_us, 150);
+    assert_eq!(sync.offset(), Some(50_000 + 150 - 1_300));
+    assert_eq!(sync.rtt2(), Some(150));
+    // Once set, later replies are fine but unused.
+    assert_eq!(sync.handle_reply(2_000, &reply), Ok(None));
+}
+
+#[test]
+fn time_sync_rejects_an_offset_that_overflows() {
+    use nt4_core::time_sync::TimeSync;
+    const INVALID: &str = "RTT ping response has invalid timestamp values";
+    let reply = |server_us, sent_us| BinaryMessage {
+        id: -1,
+        timestamp_us: server_us,
+        value: Value::Int(sent_us),
+    };
+    // Server time + rtt/2 overflows.
+    let mut sync = TimeSync::new();
+    assert_eq!(
+        sync.handle_reply(10, &reply(i64::MAX, 0)),
+        Err(INVALID.into())
+    );
+    // Server time - now overflows.
+    assert_eq!(
+        sync.handle_reply(1, &reply(i64::MIN, 1)),
+        Err(INVALID.into())
+    );
+    // The round trip itself overflows.
+    assert_eq!(
+        sync.handle_reply(i64::MAX, &reply(0, -1)),
+        Err(INVALID.into())
+    );
+    assert_eq!(sync.offset(), None);
+}

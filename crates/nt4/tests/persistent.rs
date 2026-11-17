@@ -203,3 +203,47 @@ async fn dropping_the_server_saves_the_last_change() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains(r#""value": 5"#), "{text}");
 }
+
+#[tokio::test]
+async fn an_unreadable_file_is_reported_and_the_server_still_starts() {
+    let dir = TempDir::new("unreadable");
+    // A directory where the file should be: it exists but can't be read.
+    let file = dir.file();
+    std::fs::create_dir(&file).unwrap();
+    let server = start(&file).await;
+    let errors = server.persistent_load_errors();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].starts_with("could not open persistent file '"),
+        "{errors:?}"
+    );
+    assert_eq!(persistent_value(&server), None);
+}
+
+#[tokio::test]
+async fn a_failed_save_is_reported_as_a_warning() {
+    let dir = TempDir::new("unwritable");
+    let file = dir.file();
+    let server = start(&file).await;
+    let mut events = server.events();
+    // Take the directory away so the save can't write its temporary file.
+    std::fs::remove_dir_all(&dir.0).unwrap();
+    let p = server.publish_generic("/gain", NtType::Double, persistent());
+    p.set(Value::Double(0.5)).unwrap();
+
+    let warning = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await {
+                Some(nt4::ServerEvent::Warning(w)) => return w,
+                Some(_) => {}
+                None => panic!("events ended"),
+            }
+        }
+    })
+    .await
+    .expect("no warning within 5 s");
+    assert!(
+        warning.starts_with("could not write persistent file '"),
+        "{warning}"
+    );
+}
