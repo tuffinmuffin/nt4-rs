@@ -10,7 +10,8 @@
 //! publishing registers the schemas (`T`'s and those of the structs it
 //! contains) the way ntcore does: each once per client or server, on a
 //! retained `/.schema/struct:<Name>` topic of type `structschema`.
-//! [`crate::wpimath`] has WPILib's geometry and kinematics types ready-made.
+//! The [`nt4-wpimath`](https://docs.rs/nt4-wpimath) crate has WPILib's
+//! geometry and kinematics types ready-made.
 //!
 //! For protobuf, implement [`NtProtobuf`] and use [`Proto<T>`] as the value
 //! type. Its schemas are the serialized `FileDescriptorProto`s, on
@@ -20,6 +21,7 @@
 //! [`nt4_proto::structs`].
 //!
 //! ```
+//! use std::borrow::Cow;
 //! use nt4::structs::{NtStruct, StructField, StructReader};
 //!
 //! /// A struct of our own: two `int32`s.
@@ -30,9 +32,13 @@
 //! }
 //!
 //! impl NtStruct for Counts {
-//!     const TYPE_NAME: &'static str = "Counts";
 //!     const SIZE: usize = 8;
-//!     const SCHEMA: &'static str = "int32 good;int32 bad";
+//!     fn type_name() -> Cow<'static, str> {
+//!         "Counts".into()
+//!     }
+//!     fn schema() -> Cow<'static, str> {
+//!         "int32 good;int32 bad".into()
+//!     }
 //!     fn pack(&self, out: &mut Vec<u8>) {
 //!         self.good.pack(out);
 //!         self.bad.pack(out);
@@ -52,6 +58,8 @@
 //! assert_eq!(bytes, Value::Raw(vec![1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]));
 //! ```
 
+use std::borrow::Cow;
+
 use nt4_proto::structs::StructDatabase;
 use nt4_proto::{NtType, Value};
 
@@ -69,13 +77,19 @@ pub const SCHEMA_PREFIX: &str = "/.schema/";
 ///
 /// The layout is packed, little-endian, in schema order, as wpiutil's
 /// `Struct<T>`. See the [module docs](self) for an example.
+///
+/// The name and schema are functions rather than constants so that generic
+/// types can build them, as wpimath's `Matrix__<rows>_<cols>` does. They are
+/// only called when a topic is published or subscribed, not per value.
 pub trait NtStruct: Sized + Clone + Send + Sync + 'static {
-    /// The struct name, e.g. `Pose2d`. The topic type is `struct:<name>`.
-    const TYPE_NAME: &'static str;
     /// Packed size in bytes.
     const SIZE: usize;
+
+    /// The struct name, e.g. `Pose2d`. The topic type is `struct:<name>`.
+    fn type_name() -> Cow<'static, str>;
+
     /// The schema, e.g. `Translation2d translation;Rotation2d rotation`.
-    const SCHEMA: &'static str;
+    fn schema() -> Cow<'static, str>;
 
     /// Append exactly [`SIZE`](Self::SIZE) bytes.
     fn pack(&self, out: &mut Vec<u8>);
@@ -93,7 +107,7 @@ pub trait NtStruct: Sized + Clone + Send + Sync + 'static {
     /// contains first, then its own (`struct:<name>`). Don't override.
     fn for_each_struct_schema(f: &mut dyn FnMut(&str, &str)) {
         Self::for_each_nested(f);
-        f(&format!("struct:{}", Self::TYPE_NAME), Self::SCHEMA);
+        f(&format!("struct:{}", Self::type_name()), &Self::schema());
     }
 }
 
@@ -186,7 +200,29 @@ impl<'a> StructReader<'a> {
 /// [`pack`](NtStruct::pack) writes that many. Meant for unit tests.
 ///
 /// ```
-/// nt4::structs::check::<nt4::wpimath::Pose3d>().unwrap();
+/// use std::borrow::Cow;
+/// use nt4::structs::{NtStruct, StructReader};
+///
+/// #[derive(Clone, Default)]
+/// struct Flag(bool);
+///
+/// impl NtStruct for Flag {
+///     const SIZE: usize = 1;
+///     fn type_name() -> Cow<'static, str> {
+///         "Flag".into()
+///     }
+///     fn schema() -> Cow<'static, str> {
+///         "bool value".into()
+///     }
+///     fn pack(&self, out: &mut Vec<u8>) {
+///         out.push(self.0 as u8);
+///     }
+///     fn unpack(data: &[u8]) -> Self {
+///         Flag(StructReader::new(data).read())
+///     }
+/// }
+///
+/// nt4::structs::check::<Flag>().unwrap();
 /// ```
 pub fn check<T: NtStruct + Default>() -> Result<(), String> {
     let mut db = StructDatabase::new();
@@ -200,10 +236,11 @@ pub fn check<T: NtStruct + Default>() -> Result<(), String> {
     if let Some(e) = err {
         return Err(e);
     }
-    let desc = db.find(T::TYPE_NAME).ok_or("own schema not registered")?;
+    let name = T::type_name();
+    let desc = db.find(&name).ok_or("own schema not registered")?;
     let size = desc
         .size()
-        .ok_or_else(|| format!("{}: a nested schema is missing", T::TYPE_NAME))?;
+        .ok_or_else(|| format!("{name}: a nested schema is missing"))?;
     if size != T::SIZE {
         return Err(format!("schema is {size} bytes, SIZE is {}", T::SIZE));
     }
@@ -234,7 +271,7 @@ fn struct_schemas<T: NtStruct>(f: &mut dyn FnMut(&str, &str, &[u8])) {
 impl<T: NtStruct> NtValue for T {
     fn nt_type() -> NtType {
         NtType::Struct {
-            name: T::TYPE_NAME.into(),
+            name: T::type_name().into_owned(),
             array: false,
         }
     }
@@ -257,7 +294,7 @@ impl<T: NtStruct> NtValue for T {
 impl<T: NtStruct> NtValue for Vec<T> {
     fn nt_type() -> NtType {
         NtType::Struct {
-            name: T::TYPE_NAME.into(),
+            name: T::type_name().into_owned(),
             array: true,
         }
     }

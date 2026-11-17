@@ -9,7 +9,7 @@
 //!
 //! Struct and protobuf topics (`struct:Pose2d`, ...) are typed too:
 //! implement [`NtStruct`] or [`NtProtobuf`], or use the WPILib types in
-//! [`wpimath`]. Publishing one registers its schemas under `/.schema/`, as
+//! the [`nt4-wpimath`](https://docs.rs/nt4-wpimath) crate. Publishing one registers its schemas under `/.schema/`, as
 //! ntcore does; see [`structs`].
 //!
 //! The protocol work happens in [`nt4_core`], which has no I/O; this crate
@@ -46,7 +46,6 @@ pub mod handles;
 pub mod server;
 pub mod structs;
 pub mod typed;
-pub mod wpimath;
 
 #[cfg(feature = "client")]
 pub use client::{Client, ClientConfig};

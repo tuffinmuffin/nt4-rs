@@ -1,6 +1,6 @@
 [package]
 name = "nt4-core"
-description = "NetworkTables 4.1 client and server state machines with no sockets (sans-I/O): announcements, publish/subscribe, time sync, meta topics, reconnect replay"
+description = "Unofficial NetworkTables 4.1 (NT4) client and server state machines for Rust, with no sockets or clock (sans-I/O), behaving as WPILib's ntcore"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

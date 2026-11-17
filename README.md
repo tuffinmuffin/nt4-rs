@@ -3,6 +3,9 @@
 A NetworkTables 4.1 library for Rust, with both a client and a server, so Rust
 programs can talk to WPILib robot code, dashboards and coprocessors.
 
+Unofficial: not affiliated with or endorsed by WPILib or FIRST. It is tested
+against WPILib's ntcore (see [Conformance testing](#conformance-testing)).
+
 NetworkTables (NT) is how FRC robot code, dashboards and coprocessors share
 values. NT4 runs over a WebSocket: JSON text frames for control messages,
 MessagePack binary frames for values. The protocol is described in
@@ -10,14 +13,18 @@ MessagePack binary frames for values. The protocol is described in
 
 ## Status
 
-Milestone 3 of 6: the client is usable. The server comes next. Current state
-and next steps are in [docs/STATUS.md](docs/STATUS.md).
+Client and server are done and tested against ntcore; the first release
+(0.1) is being prepared. Current state and next steps are in
+[docs/STATUS.md](docs/STATUS.md).
 
-| Crate | What it does | Status |
-| --- | --- | --- |
-| `nt4-proto` | JSON and MessagePack encode/decode, value and type definitions. No I/O. | Done |
-| `nt4-core` | Client and server state machines with no sockets (sans-I/O) | Client done; server in milestone 4 |
-| `nt4` | tokio runtime: `client` and `server` features | Client done; server in milestone 5 |
+| Crate | What it does |
+| --- | --- |
+| [`nt4`](crates/nt4) | The library most programs want: tokio client (`client` feature, on by default) and server (`server` feature), typed topics and structs |
+| [`nt4-wpimath`](crates/nt4-wpimath) | WPILib's wpimath types (`Pose2d`, `Pose3d`, swerve module states, ...) as struct topics for `nt4` |
+| [`nt4-core`](crates/nt4-core) | Building block: client and server state machines with no sockets or clock (sans-I/O), for other runtimes and WASM |
+| [`nt4-proto`](crates/nt4-proto) | Building block: JSON and MessagePack encode and decode, value and type definitions, struct schemas. No I/O |
+
+`nt4` re-exports the two building blocks as `nt4::core` and `nt4::proto`.
 
 The full plan, including how conformance is tested, is in the
 [project plan doc](https://claude.ai/artifact/R1JvYBZZYPm6HuUuFM9QPh).
@@ -87,13 +94,14 @@ no clock, so it can be driven from any runtime or from WASM.
 
 ## Releasing
 
-The three crates share one version (workspace `version`) and are published
+The four crates share one version (workspace `version`) and are published
 together:
 
 1. Update `CHANGELOG.md`, and bump `version` in the root `Cargo.toml` and on
-   each `nt4-proto` / `nt4-core` path dependency.
+   each `nt4-proto` / `nt4-core` / `nt4` path dependency.
 2. `cargo publish --workspace --dry-run`, then `cargo publish --workspace`
-   (Cargo publishes `nt4-proto`, `nt4-core`, `nt4` in dependency order).
+   (Cargo publishes `nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath` in
+   dependency order).
 3. Tag the release `v<version>`.
 
 CI runs the dry run on every push, so packaging problems show up early.

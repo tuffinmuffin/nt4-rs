@@ -1,6 +1,6 @@
 [package]
 name = "nt4"
-description = "NetworkTables 4.1 for tokio: a client that connects, reconnects and keeps time sync, and a server, with typed publishers and subscribers"
+description = "Unofficial NetworkTables 4.1 (NT4) client and server for Rust and tokio, compatible with WPILib's ntcore: typed topics, structs, time sync, reconnect"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

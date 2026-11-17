@@ -313,10 +313,27 @@ impl Server {
     /// let mode = server.publish::<String>("/robot/mode");
     /// mode.set("disabled".into()); // clients that subscribe get it
     ///
-    /// use nt4::wpimath::SwerveModuleVelocity;
-    /// let modules = server.publish::<Vec<SwerveModuleVelocity>>("/drive/modules");
-    /// assert!(server.has_schema("struct:Rotation2d")); // nested schemas too
-    /// modules.set(vec![SwerveModuleVelocity::default(); 4]);
+    /// // `Counts` implements `NtStruct` (see `nt4::structs`).
+    /// # use std::borrow::Cow;
+    /// # use nt4::structs::{NtStruct, StructReader};
+    /// # #[derive(Clone, Default)]
+    /// # struct Counts { good: i32, bad: i32 }
+    /// # impl NtStruct for Counts {
+    /// #     const SIZE: usize = 8;
+    /// #     fn type_name() -> Cow<'static, str> { "Counts".into() }
+    /// #     fn schema() -> Cow<'static, str> { "int32 good;int32 bad".into() }
+    /// #     fn pack(&self, out: &mut Vec<u8>) {
+    /// #         out.extend(self.good.to_le_bytes());
+    /// #         out.extend(self.bad.to_le_bytes());
+    /// #     }
+    /// #     fn unpack(data: &[u8]) -> Self {
+    /// #         let mut r = StructReader::new(data);
+    /// #         Counts { good: r.read(), bad: r.read() }
+    /// #     }
+    /// # }
+    /// let counts = server.publish::<Vec<Counts>>("/vision/counts");
+    /// assert!(server.has_schema("struct:Counts"));
+    /// counts.set(vec![Counts::default(); 4]);
     /// # }
     /// ```
     pub fn publish<T: NtValue>(&self, name: &str) -> Publisher<T> {

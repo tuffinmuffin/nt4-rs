@@ -1,0 +1,22 @@
+[package]
+name = "nt4-wpimath"
+description = "Unofficial: WPILib's wpimath types (Pose2d, Pose3d, swerve module states, ...) as NetworkTables struct topics for the nt4 crate, with wpimath's exact schemas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+documentation = "https://docs.rs/nt4-wpimath"
+readme = "README.md"
+keywords = ["frc", "networktables", "wpilib", "wpimath", "robotics"]
+categories = ["encoding", "science::robotics"]
+
+[dependencies]
+nt4 = { path = "../nt4", version = "0.1.0", default-features = false }
+
+[dev-dependencies]
+nt4 = { path = "../nt4", version = "0.1.0", features = ["client"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
+
+[lints]
+workspace = true

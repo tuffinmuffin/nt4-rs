@@ -1,4 +1,6 @@
-//! WPILib's geometry and kinematics types as [`NtStruct`]s.
+//! WPILib's `wpimath` types as [`NtStruct`]s, for the [`nt4`] crate.
+//!
+//! Unofficial: not affiliated with or endorsed by WPILib or FIRST.
 //!
 //! Plain data with the same names, fields, units and struct schemas as
 //! WPILib 2027's `wpimath`, so robot code, AdvantageScope and Elastic read
@@ -7,7 +9,7 @@
 //! needed.
 //!
 //! ```
-//! use nt4::wpimath::{Pose2d, Rotation2d, Translation2d};
+//! use nt4_wpimath::{Pose2d, Rotation2d, Translation2d};
 //! let pose = Pose2d {
 //!     translation: Translation2d { x: 1.0, y: 2.0 },
 //!     rotation: Rotation2d { value: std::f64::consts::FRAC_PI_2 },
@@ -16,7 +18,14 @@
 //! # let _ = pose;
 //! ```
 
-use crate::structs::{NtStruct, StructField, StructReader};
+use std::borrow::Cow;
+
+use nt4::structs::{NtStruct, StructField, StructReader};
+
+// Compile and run the code in README.md as doc tests.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+struct ReadmeDoctests;
 
 /// Implements [`NtStruct`] for a struct whose fields are all
 /// [`StructField`]s, in order.
@@ -33,9 +42,13 @@ macro_rules! wpi_struct {
         }
 
         impl NtStruct for $ty {
-            const TYPE_NAME: &'static str = stringify!($ty);
             const SIZE: usize = 0 $(+ <$fty as StructField>::SIZE)*;
-            const SCHEMA: &'static str = $schema;
+            fn type_name() -> Cow<'static, str> {
+                Cow::Borrowed(stringify!($ty))
+            }
+            fn schema() -> Cow<'static, str> {
+                Cow::Borrowed($schema)
+            }
             fn pack(&self, out: &mut Vec<u8>) {
                 $(StructField::pack(&self.$field, out);)*
             }
@@ -211,7 +224,7 @@ wpi_struct!(
 mod tests {
     // Written by Claude.
     use super::*;
-    use crate::structs::check;
+    use nt4::structs::check;
 
     #[test]
     fn layouts_match_schemas() {

@@ -6,6 +6,8 @@ clock ("sans-I/O"). Frames and the time go in; frames to send and events
 come out. They run the same under tokio, in a browser (WASM), on a blocking
 socket, or in a unit test with a fake clock.
 
+Unofficial: not affiliated with or endorsed by WPILib or FIRST.
+
 Most programs want the [`nt4`](https://docs.rs/nt4) crate, which wraps this
 one with tokio and a typed API. Use `nt4-core` directly to bring your own
 runtime or WebSocket.

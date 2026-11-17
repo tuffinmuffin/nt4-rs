@@ -230,10 +230,27 @@ impl Client {
     /// let speed = client.publish::<f64>("/robot/speed", Default::default());
     /// speed.set(1.5); // sent once connected
     ///
-    /// use nt4::wpimath::Pose2d;
-    /// let pose = client.publish::<Pose2d>("/vision/pose", Default::default());
-    /// assert!(client.has_schema("struct:Pose2d"));
-    /// pose.set(Pose2d::default());
+    /// // `Counts` implements `NtStruct` (see `nt4::structs`).
+    /// # use std::borrow::Cow;
+    /// # use nt4::structs::{NtStruct, StructReader};
+    /// # #[derive(Clone, Default)]
+    /// # struct Counts { good: i32, bad: i32 }
+    /// # impl NtStruct for Counts {
+    /// #     const SIZE: usize = 8;
+    /// #     fn type_name() -> Cow<'static, str> { "Counts".into() }
+    /// #     fn schema() -> Cow<'static, str> { "int32 good;int32 bad".into() }
+    /// #     fn pack(&self, out: &mut Vec<u8>) {
+    /// #         out.extend(self.good.to_le_bytes());
+    /// #         out.extend(self.bad.to_le_bytes());
+    /// #     }
+    /// #     fn unpack(data: &[u8]) -> Self {
+    /// #         let mut r = StructReader::new(data);
+    /// #         Counts { good: r.read(), bad: r.read() }
+    /// #     }
+    /// # }
+    /// let counts = client.publish::<Counts>("/vision/counts", Default::default());
+    /// assert!(client.has_schema("struct:Counts"));
+    /// counts.set(Counts::default());
     /// # }
     /// ```
     pub fn publish<T: NtValue>(&self, name: &str, options: PublishOptions) -> Publisher<T> {
