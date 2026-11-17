@@ -141,11 +141,19 @@ jobs:
             echo
             echo "Crates: $(for c in $CRATES; do printf '[%s](https://crates.io/crates/%s/%s) ' "$c" "$c" "$VERSION"; done)"
           } >> notes.md
-          flags=()
-          case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+          # A version with a `-` (0.2.0-alpha.1) is a pre-release; any other
+          # is a normal release and becomes the repository's latest.
+          case "$VERSION" in
+            *-*) prerelease=true latest=false ;;
+            *) prerelease=false latest=true ;;
+          esac
+          args=(--title "nt4 $VERSION" --notes-file notes.md
+                --prerelease="$prerelease" --latest="$latest")
+          # A release made first in GitHub's web page (which also makes the
+          # tag) gets the same title, flags and notes, and is published if
+          # it was left as a draft.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md "${flags[@]}"
+            gh release edit "$GITHUB_REF_NAME" "${args[@]}" --draft=false
           else
-            gh release create "$GITHUB_REF_NAME" --title "nt4 $VERSION" \
-              --notes-file notes.md --verify-tag "${flags[@]}"
+            gh release create "$GITHUB_REF_NAME" "${args[@]}" --verify-tag
           fi
