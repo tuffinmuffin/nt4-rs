@@ -107,7 +107,7 @@ together, by CI, when a version tag is pushed:
    the one on crates.io. 0.2.0 was bumped that way, with the derive.)
 2. Tag the merge commit on `main` and push the tag:
    ```bash
-   git fetch origin && git tag v0.1.0 origin/main && git push origin v0.1.0
+   git fetch origin && git tag v0.2.0 origin/main && git push origin v0.2.0
    ```
 3. The `Release` workflow (`.github/workflows/release.yml`) checks that the
    tag matches the crates' version, that the commit is on `main` with CI

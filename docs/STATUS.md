@@ -13,7 +13,7 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 | 3 | `nt4`: tokio `Client`, typed publishers and subscribers, pyntcore interop tests, load benchmark, decoder fuzzer, crates.io readiness | Merged (PRs #3 to #7) |
 | 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | Merged (PR #8) |
 | 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | Merged (PR #9) |
-| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); 0.1.0 published 2026-11-16 |
+| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); 0.1.0 published 2026-11-16; 0.2.0 ready to tag |
 
 ## Milestone 4: `ServerCore`
 
@@ -438,8 +438,16 @@ check is enough.
         crate is now in modules by group, re-exported at the root. Audit:
         27 of WPILib's 46 types are ours and all match C++ and RobotPy; 0
         `todo`, 19 `na`.
-   5. A weekly CI job that runs both audits against allwpilib's newest
-      release and opens an issue when something changed.
+   5. Weekly upstream watch: `.github/workflows/upstream-watch.yml`
+      (Mondays, or by hand with any allwpilib tag or commit). It takes the
+      newest allwpilib release from 2027 on and, if it is newer than
+      `ALLWPILIB_COMMIT` (GitHub's compare API), runs both audits against
+      it with the newest RobotPy; a mismatch opens or adds to one
+      `upstream-watch` issue and fails the run. A release older than the
+      pin is skipped: it lacks cases ported from the pin (alpha-8, 86
+      commits behind the pin, is missing five `DynamicStructTest` cases),
+      which isn't news. The sparse checkout both workflows use is
+      `scripts/fetch_allwpilib.sh`.
    6. Releases: 0.1.0 is on crates.io, so the release workflow can move
       to crates.io trusted publishing (`rust-lang/crates-io-auth-action`,
       a short-lived token per run; set up under each crate's settings on
