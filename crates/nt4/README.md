@@ -85,7 +85,8 @@ warnings about what clients send.
 Structs are typed too. The [`nt4-wpimath`](https://docs.rs/nt4-wpimath)
 crate has WPILib's geometry and kinematics types (`Pose2d`, `Pose3d`,
 `SwerveModuleVelocity`, ...), and your own types implement `NtStruct` (see
-`nt4::structs`). Publishing one also publishes its schema under
+[`nt4::structs`](https://docs.rs/nt4/latest/nt4/structs/) for an example).
+Publishing one also publishes its schema under
 `/.schema/`, as ntcore does, so AdvantageScope and Elastic can decode it:
 
 ```toml
