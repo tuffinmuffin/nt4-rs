@@ -5,7 +5,10 @@
 //! `proto:<message name>` for protobuf. Dashboards decode them with a
 //! schema the publisher puts on `/.schema/<name>`.
 //!
-//! Implement [`NtStruct`] for a type and it is an [`NtValue`]:
+//! Implement [`NtStruct`] for a type and it is an [`NtValue`]. With the
+//! `derive` feature, `#[derive(NtStruct)]` writes the implementation,
+//! schema included, from the fields (see [the macro](macro@NtStruct)); the
+//! example below is what it saves you. Then
 //! `publish::<T>` and `subscribe::<T>` work for `T` and `Vec<T>`, and
 //! publishing registers the schemas (`T`'s and those of the structs it
 //! contains) the way ntcore does: each once per client or server, on a
@@ -65,6 +68,9 @@ use nt4_proto::{NtType, Value};
 
 use crate::NtValue;
 
+#[cfg(feature = "derive")]
+pub use nt4_derive::NtStruct;
+
 /// Schema type of struct schemas.
 pub const STRUCT_SCHEMA_TYPE: &str = "structschema";
 /// Schema type of protobuf schemas.
@@ -114,6 +120,10 @@ pub trait NtStruct: Sized + Clone + Send + Sync + 'static {
 /// A value that can be a field of an [`NtStruct`]: the schema's number
 /// types (`bool`, `int8` to `uint64`, `float`, `double`), arrays of them
 /// (`double x[3]` is `[f64; 3]`), and nested structs.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` can't be a field of an NtStruct",
+    note = "fields are bool, integers, f32, f64, arrays of those ([f64; 4]), and NtStruct types"
+)]
 pub trait StructField: Sized {
     /// Packed size in bytes.
     const SIZE: usize;
@@ -121,12 +131,36 @@ pub trait StructField: Sized {
     fn pack(&self, out: &mut Vec<u8>);
     /// Read from exactly [`SIZE`](Self::SIZE) bytes.
     fn unpack(data: &[u8]) -> Self;
+
+    /// How a field of this type named `name` is declared in a schema:
+    /// `double x`, `double x[4]`, `Rotation2d x`. `#[derive(NtStruct)]`
+    /// builds schemas from it. `None` (the default) for a type that has
+    /// no declaration, such as an array of arrays.
+    ///
+    /// ```
+    /// use nt4::structs::StructField;
+    /// assert_eq!(f64::schema_field("x").as_deref(), Some("double x"));
+    /// assert_eq!(<[i16; 4]>::schema_field("raw").as_deref(), Some("int16 raw[4]"));
+    /// ```
+    fn schema_field(name: &str) -> Option<String> {
+        let _ = name;
+        None
+    }
+
+    /// Call [`NtStruct::for_each_struct_schema`] of the struct type in this
+    /// field, if there is one. The default is for fields with none.
+    fn for_each_field_schema(f: &mut dyn FnMut(&str, &str)) {
+        let _ = f;
+    }
 }
 
 macro_rules! number_field {
-    ($($t:ty),*) => {$(
+    ($($t:ty => $name:literal),*) => {$(
         impl StructField for $t {
             const SIZE: usize = std::mem::size_of::<$t>();
+            fn schema_field(name: &str) -> Option<String> {
+                Some(format!(concat!($name, " {}"), name))
+            }
             fn pack(&self, out: &mut Vec<u8>) {
                 out.extend_from_slice(&self.to_le_bytes());
             }
@@ -139,10 +173,18 @@ macro_rules! number_field {
     )*};
 }
 
-number_field!(u8, i8, u16, i16, u32, i32, u64, i64, f32, f64);
+// The names wpimath's C++ schemas use (`double`, not `float64`).
+number_field!(
+    u8 => "uint8", i8 => "int8", u16 => "uint16", i16 => "int16",
+    u32 => "uint32", i32 => "int32", u64 => "uint64", i64 => "int64",
+    f32 => "float", f64 => "double"
+);
 
 impl StructField for bool {
     const SIZE: usize = 1;
+    fn schema_field(name: &str) -> Option<String> {
+        Some(format!("bool {name}"))
+    }
     fn pack(&self, out: &mut Vec<u8>) {
         out.push(*self as u8);
     }
@@ -153,6 +195,15 @@ impl StructField for bool {
 
 impl<T: StructField, const N: usize> StructField for [T; N] {
     const SIZE: usize = T::SIZE * N;
+    fn schema_field(name: &str) -> Option<String> {
+        // A schema field has at most one array size.
+        T::schema_field(name)
+            .filter(|s| !s.ends_with(']'))
+            .map(|s| format!("{s}[{N}]"))
+    }
+    fn for_each_field_schema(f: &mut dyn FnMut(&str, &str)) {
+        T::for_each_field_schema(f);
+    }
     fn pack(&self, out: &mut Vec<u8>) {
         for v in self {
             v.pack(out);
@@ -165,11 +216,61 @@ impl<T: StructField, const N: usize> StructField for [T; N] {
 
 impl<T: NtStruct> StructField for T {
     const SIZE: usize = <T as NtStruct>::SIZE;
+    fn schema_field(name: &str) -> Option<String> {
+        Some(format!("{} {name}", T::type_name()))
+    }
+    fn for_each_field_schema(f: &mut dyn FnMut(&str, &str)) {
+        T::for_each_struct_schema(f);
+    }
     fn pack(&self, out: &mut Vec<u8>) {
         NtStruct::pack(self, out);
     }
     fn unpack(data: &[u8]) -> Self {
         NtStruct::unpack(&data[..<T as NtStruct>::SIZE])
+    }
+}
+
+/// Helpers for `#[derive(NtStruct)]`'s code. Not part of the public API.
+#[doc(hidden)]
+pub mod __private {
+    use super::StructField;
+
+    pub use std::borrow::Cow;
+    pub use std::default::Default;
+    pub use std::string::String;
+    pub use std::vec::Vec;
+
+    /// Append the declaration of field `name`, of Rust type `ty`, to
+    /// `schema`.
+    pub fn field<T: StructField>(schema: &mut String, name: &str, ty: &str) {
+        let decl = T::schema_field(name).unwrap_or_else(|| {
+            panic!(
+                "NtStruct field `{name}`: `{ty}` has no schema declaration \
+                 (StructField::schema_field); give the struct #[nt4(schema = \"..\")]"
+            )
+        });
+        if !schema.is_empty() {
+            schema.push(';');
+        }
+        schema.push_str(&decl);
+    }
+
+    /// A field type's [`StructField::for_each_field_schema`].
+    pub type FieldSchemas = fn(&mut dyn FnMut(&str, &str));
+
+    /// The fields' struct schemas, each type once, in the order they first
+    /// appear (as wpimath lists them by hand).
+    pub fn nested(f: &mut dyn FnMut(&str, &str), fields: &[FieldSchemas]) {
+        let mut seen: Vec<String> = Vec::new();
+        let mut once = |ty: &str, schema: &str| {
+            if !seen.iter().any(|t| t == ty) {
+                seen.push(ty.to_owned());
+                f(ty, schema);
+            }
+        };
+        for field in fields {
+            field(&mut once);
+        }
     }
 }
 

@@ -12,10 +12,10 @@ keywords = ["frc", "networktables", "wpilib", "wpimath", "robotics"]
 categories = ["encoding", "science::robotics"]
 
 [dependencies]
-nt4 = { path = "../nt4", version = "0.1.0", default-features = false }
+nt4 = { path = "../nt4", version = "0.2.0", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
-nt4 = { path = "../nt4", version = "0.1.0", features = ["client"] }
+nt4 = { path = "../nt4", version = "0.2.0", features = ["client"] }
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
 
 [lints]

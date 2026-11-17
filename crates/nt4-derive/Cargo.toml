@@ -1,0 +1,28 @@
+[package]
+name = "nt4-derive"
+description = "Unofficial: #[derive(NtStruct)] for the nt4 crate, generating WPILib struct schemas from Rust structs and enums"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+documentation = "https://docs.rs/nt4-derive"
+readme = "README.md"
+keywords = ["frc", "networktables", "wpilib", "derive", "robotics"]
+categories = ["encoding", "science::robotics"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", default-features = false, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
+
+[dev-dependencies]
+# For the doc examples. No version, so `cargo publish` drops it (nt4
+# depends on this crate).
+nt4 = { path = "../nt4", default-features = false, features = ["derive"] }
+
+[lints]
+workspace = true

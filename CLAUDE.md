@@ -38,6 +38,11 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   time (port of wpiutil's `SchemaParser` / `DynamicStruct`; tests in
   `nt4-proto/tests/struct_schema.rs` and `dynamic_struct.rs`). `nt4::structs`
   has the typed `NtStruct` / `NtProtobuf` traits and schema registration.
+- `crates/nt4-derive`: `#[derive(NtStruct)]` (proc macro), re-exported as
+  `nt4::structs::NtStruct` behind `nt4`'s `derive` feature. The generated
+  code calls helpers in `nt4::structs::__private`. Tests:
+  `nt4/tests/derive.rs`, plus the error cases in `nt4-derive`'s own unit
+  tests.
 - `crates/nt4-wpimath`: the WPILib types, built only on `nt4`'s public
   traits. Their schemas must match wpimath's `*Struct.hpp` exactly. nt4's
   own tests use the copies in `nt4/tests/support/wpi_types.rs` instead
@@ -73,7 +78,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 python3 scripts/upstream_audit.py <allwpilib checkout>
 NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --all-features --test interop --test interop_server
 # coverage, as the CI `coverage` job measures it (needs cargo-llvm-cov)
-cargo llvm-cov -p nt4-proto -p nt4-core -p nt4 --all-features --ignore-filename-regex '(tests|examples|benches)/' --html
+cargo llvm-cov -p nt4-proto -p nt4-core -p nt4-derive -p nt4 -p nt4-wpimath --all-features --ignore-filename-regex '(tests|examples|benches)/' --html
 ```
 
 ntcore facts learned from interop: the server always renames a client to

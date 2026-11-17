@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag `v<version>` (for example `v0.1.0`) publishes the four
+# Pushing a tag `v<version>` (for example `v0.1.0`) publishes the five
 # library crates to crates.io and creates a GitHub release from that
 # version's CHANGELOG.md section. See "Releasing" in README.md.
 
@@ -16,7 +16,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # In the order crates.io needs them: each depends only on those before it.
-  CRATES: nt4-proto nt4-core nt4 nt4-wpimath
+  CRATES: nt4-proto nt4-core nt4-derive nt4 nt4-wpimath
 
 jobs:
   # Everything that can stop a bad release, before anything is published.
@@ -46,7 +46,7 @@ jobs:
             v=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$c" '.packages[] | select(.name == $c) | .version')
             if [ "$v" != "$version" ]; then
-              echo "::error::$c is version $v, not $version. All four crates share one version."
+              echo "::error::$c is version $v, not $version. All five crates share one version."
               exit 1
             fi
           done

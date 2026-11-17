@@ -1,8 +1,27 @@
 # Changelog
 
-The four crates (`nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath`) share one
-version number. Pushing the tag `v<version>` publishes them; see "Releasing"
+The library crates (`nt4-proto`, `nt4-core`, `nt4-derive`, `nt4`,
+`nt4-wpimath`) share one version number. Pushing the tag `v<version>` publishes them; see "Releasing"
 in README.md.
+
+## Unreleased
+
+- `#[derive(NtStruct)]` (new `nt4-derive` crate; turn on `nt4`'s `derive`
+  feature and use `nt4::structs::NtStruct`). For a struct with named
+  fields it builds the schema and the nested schemas from the field types,
+  declared as wpimath's C++ schemas declare them, so they can't drift from
+  the layout. A fieldless enum becomes a one-byte struct,
+  `enum {A=0,B=1} int8 variant`, as WPILib's Java `StructGenerator` writes
+  one. Options: `#[nt4(name = "..")]`, `#[nt4(schema = "..")]` and
+  `#[nt4(crate = "..")]`.
+- `StructField` has two new methods with defaults (not a breaking change):
+  `schema_field(name)` gives a field's schema declaration (`double x`,
+  `int16 raw[4]`, `Rotation2d angle`), and `for_each_field_schema` the
+  schemas of the struct in a field. Using a type that isn't a
+  `StructField` as a field now says so in the compiler error.
+- `nt4-wpimath`'s types use the derive; their schemas, sizes and nested
+  schema order are unchanged (a test checks them against wpimath's
+  `*Struct.hpp`).
 
 ## 0.1.0 (2026-11-16)
 
