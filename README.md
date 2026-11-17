@@ -21,6 +21,7 @@ crates.io and 0.2 is in progress. Current state and next steps are in
 | --- | --- |
 | [`nt4`](crates/nt4) | The library most programs want: tokio client (`client` feature, on by default) and server (`server` feature), typed topics and structs |
 | [`nt4-wpimath`](crates/nt4-wpimath) | WPILib's wpimath types (`Pose2d`, `Pose3d`, swerve module states, ...) as struct topics for `nt4` |
+| [`nt4-photon`](crates/nt4-photon) | PhotonVision pipeline results (targets, tag poses, multi-tag pose) as typed topics for `nt4`. In progress, not published yet |
 | [`nt4-derive`](crates/nt4-derive) | `#[derive(NtStruct)]`, used through `nt4`'s `derive` feature |
 | [`nt4-core`](crates/nt4-core) | Building block: client and server state machines with no sockets or clock (sans-I/O), for other runtimes and WASM |
 | [`nt4-proto`](crates/nt4-proto) | Building block: JSON and MessagePack encode and decode, value and type definitions, struct schemas. No I/O |
@@ -95,11 +96,11 @@ no clock, so it can be driven from any runtime or from WASM.
 
 ## Releasing
 
-The five crates share one version (workspace `version`) and are published
+The five published crates share one version (workspace `version`) and are published
 together, by CI, when a version tag is pushed:
 
 1. In a PR: bump `version` in the root `Cargo.toml` and on each
-   `nt4-proto` / `nt4-core` / `nt4-derive` / `nt4` path dependency, and rename
+   `nt4-proto` / `nt4-core` / `nt4-derive` / `nt4` / `nt4-wpimath` path dependency, and rename
    `CHANGELOG.md`'s `Unreleased` section to `<version> (<date>)`. Merge it.
    (The bump can come earlier: once one crate needs an unreleased change in
    another, CI's `cargo publish --dry-run` fails until the version is past

@@ -25,7 +25,7 @@
 //! assert_eq!(f64::from_value(&Value::Int(2)), None);
 //! ```
 
-use nt4_proto::{NtType, Value};
+use nt4_proto::{NtType, Properties, Value};
 
 /// A Rust type that can be a topic's value.
 pub trait NtValue: Sized + Clone + Send + Sync + 'static {
@@ -41,6 +41,17 @@ pub trait NtValue: Sized + Clone + Send + Sync + 'static {
     /// plain types; structs and protobuf messages have theirs.
     fn for_each_schema(f: &mut dyn FnMut(&str, &str, &[u8])) {
         let _ = f;
+    }
+
+    /// Properties a topic of this type is published with, such as
+    /// PhotonVision's `message_uuid`. Empty by default.
+    ///
+    /// ```
+    /// use nt4::NtValue;
+    /// assert!(f64::properties().is_empty());
+    /// ```
+    fn properties() -> Properties {
+        Properties::new()
     }
 }
 
