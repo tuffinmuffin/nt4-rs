@@ -17,6 +17,7 @@ nt4 = { path = "../nt4", version = "0.2.0", default-features = false, features =
 [dev-dependencies]
 nt4 = { path = "../nt4", version = "0.2.0", features = ["client"] }
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
+serde_json.workspace = true
 
 [lints]
 workspace = true

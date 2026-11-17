@@ -1,0 +1,51 @@
+# WPILib struct types nt4-wpimath doesn't have, for scripts/schema_audit.py.
+# One per line: `<name> todo|na  # reason`. Generic types are written with
+# their C++ parameters in angle brackets, as the audit prints them.
+#
+# nt4-wpimath carries the types Rust programs publish or read: geometry,
+# drive state, trajectory samples, shapes, and swerve kinematics. The rest
+# are marked `na`: read them with nt4_proto::structs (which decodes any
+# struct from its /.schema/ topic at run time), or derive your own with
+# #[derive(NtStruct)]. Any of them can move to `todo` if someone asks.
+# Decided 2026-11-16.
+
+# To add (STATUS.md, 0.2.0 item 4).
+ChassisAccelerations                 todo
+SwerveModuleAccelerations            todo
+DifferentialDriveWheelAccelerations  todo
+DifferentialDriveWheelPositions      todo
+DifferentialDriveWheelVelocities     todo
+MecanumDriveWheelAccelerations       todo
+MecanumDriveWheelPositions           todo
+MecanumDriveWheelVelocities          todo
+HolonomicSample                      todo
+DifferentialSample                   todo  # also registers HolonomicSample as nested; needs a derive option
+Rectangle2d                          todo
+Ellipse2d                            todo
+
+# Drive configuration other than swerve.
+DifferentialDriveKinematics          na  # rarely sent; derive your own (double trackwidth)
+MecanumDriveKinematics               na  # rarely sent; derive your own
+
+# Controller and model parameters: configuration, rarely sent over NT.
+SimpleMotorFeedforward               na  # controller gains
+ArmFeedforward                       na  # controller gains; Java's schema also adds a `double dt`
+ElevatorFeedforward                  na  # as ArmFeedforward
+DifferentialDriveFeedforward         na  # controller gains
+DifferentialDriveWheelVoltages       na  # controller output, rarely sent
+DCMotor                              na  # motor model
+TrapezoidProfileConstraints          na  # profile parameters
+TrapezoidProfileConstraintsMeters    na  # as TrapezoidProfileConstraints (C++ name for a length unit)
+TrapezoidProfileConstraintsRadians   na  # as TrapezoidProfileConstraints (C++ name for an angle unit)
+TrapezoidProfileState                na  # profile internals (Java only)
+ExponentialProfileState              na  # profile internals (Java only)
+CubicHermiteSpline                   na  # spline internals; trajectories are sent as samples
+QuinticHermiteSpline                 na  # as CubicHermiteSpline
+
+# Generic linear algebra: hand implementations, and RobotPy can't check them.
+Matrix__<Rows>_<Cols>                na  # linear algebra; send double[] instead
+Vector__<Size>                       na  # as Matrix
+LinearSystem__<States>_<Inputs>_<Outputs>  na  # model matrices
+
+# HAL.
+ControlWord                          na  # the one type with bit fields; decode it at run time

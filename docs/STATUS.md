@@ -313,7 +313,7 @@ check is enough.
    "Releasing" in README.md), with the `Deploy` environment's
    `CARGO_REGISTRY_TOKEN`.
 3. **0.2.0, in this order:**
-   1. `#[derive(NtStruct)]`: done on `claude/derive-ntstruct`. New
+   1. `#[derive(NtStruct)]`: merged (PR #18). New
       `nt4-derive` crate (syn 2 / quote), re-exported as
       `nt4::structs::NtStruct` behind `nt4`'s `derive` feature. Structs
       with named fields get the schema (`double x`, `int16 raw[4]`,
@@ -337,29 +337,67 @@ check is enough.
       (matching wpimath's C++ schemas), and enum values are the Rust
       discriminants rather than ordinals.
    2. `nt4-wpimath`'s types use the derive and `wpi_struct!` is gone
-      (same branch). `schemas_match_wpimath` keeps the hand-copied
-      wpimath schemas as the expected values until the audit (next) reads
-      them from allwpilib. The workspace is at 0.2.0 already: once
+      (PR #18). The workspace is at 0.2.0 already: once
       `nt4-wpimath` needs `nt4`'s new feature, `cargo publish --dry-run`
       checks it against 0.1.0 on crates.io and fails until the version
       moves past it.
-   3. A schema audit next to `scripts/upstream_audit.py`: pull every
-      `GetTypeName()` / `GetSchema()` from wpimath's `*Struct.hpp` (plus
-      Java-only ones such as HAL's `ControlWord`) at `ALLWPILIB_COMMIT`,
-      compare with what nt4-wpimath's types report, and fail on a schema
-      that differs, an upstream type that is missing and not listed as not
-      applicable, or one of ours upstream no longer has. With the derive
-      generating the schemas, this is what proves they match WPILib.
-   4. The rest of wpimath's structs, one file per group: kinematics
-      (`ChassisAccelerations`, `SwerveModuleAcceleration`, differential and
-      mecanum wheel positions, velocities and accelerations, the
-      kinematics structs), shapes (`Rectangle2d`, `Ellipse2d`),
-      trajectory samples (`HolonomicSample`, `DifferentialSample`),
-      controllers (the four feedforwards, `DifferentialDriveWheelVoltages`),
-      splines, `DCMotor`; then the generic ones (`Matrix__R_C`,
-      `Vector__N`, `SwerveDriveKinematics__N`, `LinearSystem__S_I_O`), the
-      three `TrapezoidProfileConstraints` names, and `ControlWord` (bit
-      fields and an enum).
+   3. Schema audit: done on `claude/schema-audit`.
+      `scripts/schema_audit.py <allwpilib>` reads every struct type from
+      wpimath's `*Struct.hpp` and `*Struct.java`, and HAL's `ControlWord`
+      (C++ and Java): type name, schema, and C++'s `ForEachNested` order.
+      Generic ones are reported with their parameters
+      (`Matrix__<Rows>_<Cols>`). It runs the `audit_schemas` example of
+      `nt4-wpimath` for our side, and fails on a schema or nested order
+      that differs, a type of ours WPILib doesn't have, a WPILib type that
+      isn't ours and isn't in `scripts/schema_audit.txt` (`todo` or `na`),
+      or an `NtStruct` in the crate's source that the example doesn't
+      print. C++ wins where C++ and Java disagree; the disagreements are
+      printed as notes. A third source, with `--robotpy <python>`:
+      `scripts/robotpy_structs.py` asks RobotPy's `wpiutil.wpistruct`
+      (robotpy-wpimath and robotpy-hal 2027.0.0a8, the same version as the
+      interop tests' pyntcore) for every struct type it exposes, which is
+      what the compiled C++ reports. Ours must match it in schema, size and
+      nested schemas; where it and the parsed headers differ, that's a
+      note. It runs in CI's `upstream-audit` job at `ALLWPILIB_COMMIT`
+      with RobotPy, and informationally against allwpilib `main` without.
+      At the pinned commit: 46 types; ours are 15 of them, 12 to do, 19
+      `na` (see item 4). RobotPy has
+      36 (no generic, `TrapezoidProfile*` or `ExponentialProfile*` ones),
+      and all 36 agree with the parsed C++, which checks the parser too. The
+      hand-copied `schemas_match_wpimath` test went, since the audit
+      checks the same thing against the source. It found WPILib's C++
+      and Java disagreeing (in `docs/UPSTREAM_BUGS.md`, item 9): Java's
+      `ArmFeedforward` and `ElevatorFeedforward` have an extra
+      `double dt`, so C++ and Java can't read each other's values; Java's
+      `Ellipse2d` and `Rectangle2d` have a stray space, and C++'s
+      `ControlWord` lacks one.
+   4. More wpimath structs, but not all of them (decided 2026-11-16).
+      nt4-wpimath carries the types Rust programs publish or read: drive
+      state, trajectory samples, shapes, and swerve kinematics, since
+      nearly every robot now drives swerve. The rest (feedforwards,
+      `DCMotor`, profile and spline internals, differential and mecanum
+      kinematics configs, `Matrix` / `Vector` / `LinearSystem`,
+      `ControlWord`) are `na` in `scripts/schema_audit.txt`: decode them
+      at run time with `nt4_proto::structs`, or derive your own. Each type
+      is upkeep at every WPILib rename, and the audit still flags any new
+      or renamed upstream type, so `na` is a decision that can be
+      revisited, not an oversight.
+      - Done on `claude/schema-audit`: `SwerveDriveKinematics<const N>`
+        (`SwerveDriveKinematics__N`, `Translation2d modules[N]`), by hand
+        since the derive refuses generics. The audit now checks generic
+        instances: the example prints `SwerveDriveKinematics<2>` and
+        `<4>`, each is matched to WPILib's pattern, and WPILib's schema
+        is filled in with the parameters. (RobotPy has no generic types,
+        so for these the check is against the parsed C++ only.)
+      - To do (the 12 `todo` lines): `ChassisAccelerations`,
+        `SwerveModuleAccelerations`, differential and mecanum wheel
+        positions, velocities and accelerations, `HolonomicSample`,
+        `DifferentialSample`, `Rectangle2d`, `Ellipse2d`. All derive
+        directly except `DifferentialSample`: its schema writes out
+        `HolonomicSample`'s fields (`double time;Pose2d pose;...`) but
+        C++, Java and RobotPy still register `HolonomicSample` as a
+        nested schema, so it needs a derive option for an extra nested
+        type (or a hand implementation).
    5. A weekly CI job that runs both audits against allwpilib's newest
       release and opens an issue when something changed.
    6. Releases: 0.1.0 is on crates.io, so the release workflow can move
