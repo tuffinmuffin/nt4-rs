@@ -37,7 +37,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Its own, uncached target dir: the dry run builds our crates from a
+      # temporary registry, and cargo never rebuilds a registry crate whose
+      # version it has built before, so a cached target would check this
+      # commit's crates against an older commit's nt4 0.x.y.
       - run: cargo publish --workspace --dry-run
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/package-target
 
   # nt4-proto and nt4-core must stay free of sockets and runtimes so they
   # build for the browser.
@@ -189,7 +195,7 @@ jobs:
       pull-requests: write
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      COV_ARGS: -p nt4-proto -p nt4-core -p nt4-derive -p nt4 -p nt4-wpimath --all-features --ignore-filename-regex (tests|examples|benches)/
+      COV_ARGS: -p nt4-proto -p nt4-core -p nt4-derive -p nt4 -p nt4-wpimath -p nt4-photon --all-features --ignore-filename-regex (tests|examples|benches)/
     steps:
       - uses: actions/checkout@v4
         with:

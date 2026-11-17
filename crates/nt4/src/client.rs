@@ -255,7 +255,7 @@ impl Client {
     /// ```
     pub fn publish<T: NtValue>(&self, name: &str, options: PublishOptions) -> Publisher<T> {
         T::for_each_schema(&mut |name, ty, data| self.add_schema(name, ty, data));
-        Publisher::new(self.publish_generic(name, T::nt_type(), Properties::new(), options))
+        Publisher::new(self.publish_generic(name, T::nt_type(), T::properties(), options))
     }
 
     /// Publish a data schema on `/.schema/<name>` (retained, with the schema

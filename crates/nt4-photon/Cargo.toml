@@ -1,0 +1,29 @@
+[package]
+name = "nt4-photon"
+description = "Unofficial: PhotonVision pipeline results (targets, poses, multi-tag) as typed NetworkTables topics for the nt4 crate, in PhotonVision 2027's photonstruct format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+documentation = "https://docs.rs/nt4-photon"
+readme = "README.md"
+keywords = ["frc", "networktables", "photonvision", "apriltag", "robotics"]
+categories = ["encoding", "science::robotics"]
+# Not published yet: PhotonVision 2027's format isn't released, and there's
+# no CI check against PhotonVision. See docs/STATUS.md.
+publish = false
+
+[dependencies]
+nt4 = { path = "../nt4", version = "0.2.0", default-features = false }
+nt4-wpimath = { path = "../nt4-wpimath", version = "0.2.0" }
+
+[dev-dependencies]
+nt4 = { path = "../nt4", version = "0.2.0", features = ["client", "server"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
+serde_json.workspace = true
+md-5 = "0.10"
+hex.workspace = true
+
+[lints]
+workspace = true
