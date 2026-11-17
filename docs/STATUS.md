@@ -300,23 +300,44 @@ check is enough.
    the `struct_topic` example against the server for
    `struct:SwerveModuleVelocity[]`), Elastic's Field widget, and a robot
    on a real network.
-2. **Release prep, in this order** (decided 2026-11-16: publish to
-   crates.io as `nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath`, the names
-   they have now, each marked unofficial in its description and README):
-   1. Done: `NtStruct`'s name and schema are functions, so generic types
-      can implement it.
-   2. Done: `nt4::wpimath` is now the `nt4-wpimath` crate. nt4's doc
-      examples use a small hand-written struct, its tests use test copies
-      of four WPILib types (`tests/support/wpi_types.rs`), and the
-      `struct_topic` example moved to `nt4-wpimath`. The `server` example
-      no longer publishes a pose; run `struct_topic` against it for
-      AdvantageScope's field view.
+2. **Release 0.1.0** (decided 2026-11-16: publish to crates.io as
+   `nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath`, the names they have
+   now, each marked unofficial in its description and README). Done
+   before tagging: `NtStruct`'s name and schema became functions, so
+   generic types can implement it; `nt4::wpimath` became the
+   `nt4-wpimath` crate; publish-path performance (item 5); test coverage
+   over 90% of lines in every file (#14); minimum Rust lowered to 1.85
+   (#15); the packages previewed and checked with `cargo package`. Tag
+   pushes publish through `.github/workflows/release.yml` (see
+   "Releasing" in README.md), with the `Deploy` environment's
+   `CARGO_REGISTRY_TOKEN`.
+3. **0.2.0, in this order:**
+   1. `#[derive(NtStruct)]` in a new `nt4-derive` proc-macro crate
+      (`syn` / `quote`), re-exported by `nt4` behind a `derive` feature,
+      like Java's `StructGenerator.genRecord`. It generates what
+      `wpi_struct!` does now, plus the schema string and the nested
+      schema list from the fields, so neither can drift. For that,
+      `StructField` gains `schema_field(name)` (`double x`, `double x[4]`,
+      `Rotation2d x`) and `for_each_struct_schema`, both with defaults so
+      it isn't a breaking change. Attributes: `#[nt4(name = "..")]` for a
+      WPILib type name that isn't the Rust name (the three
+      `TrapezoidProfileConstraints*`), `#[nt4(schema = "..")]` to write a
+      schema exactly. Fieldless enums become `enum {A=0,B=1} int8
+      variant`, as Java's `StructGenerator.genEnum` writes them. Bit
+      fields come later; `ControlWord`, the only WPILib type with them,
+      stays hand-written. Tests: derived and hand-written versions of a
+      struct give the same bytes and schemas, `check::<T>()` on every
+      derived type, and clear errors for tuple structs, generics and
+      unsupported field types.
+   2. `nt4-wpimath`'s `wpi_struct!` types move to the derive, and the
+      macro goes.
    3. A schema audit next to `scripts/upstream_audit.py`: pull every
       `GetTypeName()` / `GetSchema()` from wpimath's `*Struct.hpp` (plus
       Java-only ones such as HAL's `ControlWord`) at `ALLWPILIB_COMMIT`,
       compare with what nt4-wpimath's types report, and fail on a schema
       that differs, an upstream type that is missing and not listed as not
-      applicable, or one of ours upstream no longer has.
+      applicable, or one of ours upstream no longer has. With the derive
+      generating the schemas, this is what proves they match WPILib.
    4. The rest of wpimath's structs, one file per group: kinematics
       (`ChassisAccelerations`, `SwerveModuleAcceleration`, differential and
       mecanum wheel positions, velocities and accelerations, the
@@ -329,17 +350,18 @@ check is enough.
       fields and an enum).
    5. A weekly CI job that runs both audits against allwpilib's newest
       release and opens an issue when something changed.
-   6. Publish-path performance (item 4 below).
-   7. `cargo publish --workspace --dry-run`, then publish, then tag.
-   Later: `#[derive(NtStruct)]` in an `nt4-derive` crate, like Java's
-   `StructGenerator.genRecord`.
-3. **Report the ntcore bugs to allwpilib** (side todo, tracked
+   6. Releases: once 0.1.0 is on crates.io, switch the release workflow
+      to crates.io trusted publishing (`rust-lang/crates-io-auth-action`,
+      a short-lived token per run; set up under each crate's settings on
+      crates.io for this repo, `release.yml` and the `Deploy` environment)
+      and delete the long-lived `CARGO_REGISTRY_TOKEN`.
+4. **Report the ntcore bugs to allwpilib** (side todo, tracked
    separately; notes in `docs/UPSTREAM_BUGS.md`): the two parser bugs
    below, the two server ones above (the missing `ack`, and the stale
    announce flag), the Windows persistent-file bug, the
    `std::array` struct schema, and two client queue-ordering bugs (a
    `setproperties` overtaking its `publish`, and a dropped flush).
-4. **nt4's cost per frame** on localhost and per published value: done in
+5. **nt4's cost per frame** on localhost and per published value: done in
    PR #13 (see the benchmark notes below). Localhost receive is now within
    about a fifth of ntcore on a 2-core VM; the rest is mostly kernel time.
    Worth rerunning `bench/` on the 4-core x86 VM the README tables came

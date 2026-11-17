@@ -1,0 +1,151 @@
+name: Release
+
+# Pushing a tag `v<version>` (for example `v0.1.0`) publishes the four
+# library crates to crates.io and creates a GitHub release from that
+# version's CHANGELOG.md section. See "Releasing" in README.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+# One release at a time; never cancel one halfway through publishing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # In the order crates.io needs them: each depends only on those before it.
+  CRATES: nt4-proto nt4-core nt4 nt4-wpimath
+
+jobs:
+  # Everything that can stop a bad release, before anything is published.
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # to read the CI run of the tagged commit
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: The tag matches the crates' version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "nt4") | .version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the workspace version $version. Bump the version in Cargo.toml (or fix the tag)."
+            exit 1
+          fi
+          for c in $CRATES; do
+            v=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg c "$c" '.packages[] | select(.name == $c) | .version')
+            if [ "$v" != "$version" ]; then
+              echo "::error::$c is version $v, not $version. All four crates share one version."
+              exit 1
+            fi
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: The tagged commit is on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that isn't on main. Tag a commit on main."
+            exit 1
+          fi
+
+      - name: CHANGELOG.md has a section for this version
+        run: |
+          version=${{ steps.version.outputs.version }}
+          if ! grep -qE "^## $version( |$)" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' section. Rename 'Unreleased' to it before tagging."
+            exit 1
+          fi
+
+      # CI on main runs the tests on three OSes, the interop tests against
+      # ntcore and the MSRV build. Wait for that run on this commit and
+      # require it to have passed, rather than repeating it here.
+      - name: CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 90); do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+              --event push --limit 1 --json status,conclusion,url --jq '.[0] // empty')
+            if [ -z "$run" ]; then
+              echo "No CI run for $GITHUB_SHA yet; waiting."
+            elif [ "$(jq -r .status <<<"$run")" != completed ]; then
+              echo "CI is still running: $(jq -r .url <<<"$run")"
+            elif [ "$(jq -r .conclusion <<<"$run")" = success ]; then
+              echo "CI passed: $(jq -r .url <<<"$run")"
+              exit 0
+            else
+              echo "::error::CI didn't pass on this commit ($(jq -r .conclusion <<<"$run")): $(jq -r .url <<<"$run")"
+              exit 1
+            fi
+            sleep 60
+          done
+          echo "::error::Gave up waiting for CI on $GITHUB_SHA after 90 minutes."
+          exit 1
+
+      - run: cargo publish --workspace --dry-run
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    # Holds CARGO_REGISTRY_TOKEN. Its protection rules (if any) apply here.
+    environment: Deploy
+    permissions:
+      contents: write # to create the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # One crate at a time, skipping any this version already has on
+      # crates.io, so a run that failed partway can simply be re-run.
+      # (cargo publish waits for each crate to appear in the index before
+      # the next one, which needs it, is published.)
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          for c in $CRATES; do
+            status=$(curl -s -o /dev/null -w '%{http_code}' \
+              -A "nt4-rs release workflow (https://github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$c/$VERSION")
+            if [ "$status" = 200 ]; then
+              echo "$c $VERSION is already on crates.io; skipping."
+              continue
+            fi
+            cargo publish -p "$c"
+          done
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # This version's CHANGELOG section, without its heading.
+          awk -v v="$VERSION" '
+            $0 ~ "^## " v "( |$)" { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "Crates: $(for c in $CRATES; do printf '[%s](https://crates.io/crates/%s/%s) ' "$c" "$c" "$VERSION"; done)"
+          } >> notes.md
+          flags=()
+          case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md "${flags[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" --title "nt4 $VERSION" \
+              --notes-file notes.md --verify-tag "${flags[@]}"
+          fi

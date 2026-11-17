@@ -95,16 +95,28 @@ no clock, so it can be driven from any runtime or from WASM.
 ## Releasing
 
 The four crates share one version (workspace `version`) and are published
-together:
+together, by CI, when a version tag is pushed:
 
-1. Update `CHANGELOG.md`, and bump `version` in the root `Cargo.toml` and on
-   each `nt4-proto` / `nt4-core` / `nt4` path dependency.
-2. `cargo publish --workspace --dry-run`, then `cargo publish --workspace`
-   (Cargo publishes `nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath` in
-   dependency order).
-3. Tag the release `v<version>`.
+1. In a PR: bump `version` in the root `Cargo.toml` and on each
+   `nt4-proto` / `nt4-core` / `nt4` path dependency, and rename
+   `CHANGELOG.md`'s `Unreleased` section to `<version> (<date>)`. Merge it.
+2. Tag the merge commit on `main` and push the tag:
+   ```bash
+   git fetch origin && git tag v0.1.0 origin/main && git push origin v0.1.0
+   ```
+3. The `Release` workflow (`.github/workflows/release.yml`) checks that the
+   tag matches the crates' version, that the commit is on `main` with CI
+   passed, and that the changelog has the section. Then it publishes
+   `nt4-proto`, `nt4-core`, `nt4` and `nt4-wpimath` in that order with the
+   `Deploy` environment's `CARGO_REGISTRY_TOKEN`, and creates the GitHub
+   release from the changelog section.
 
-CI runs the dry run on every push, so packaging problems show up early.
+If publishing fails partway, re-run the workflow: crates already on
+crates.io at that version are skipped. A published version can't be
+changed or reused (only yanked), so fix forward with the next patch
+version. A tag like `v0.2.0-alpha.1` makes a pre-release. CI runs
+`cargo publish --dry-run` on every push, so packaging problems show up
+before a release.
 
 ## Development
 
