@@ -1,4 +1,4 @@
-//! WPILib's `wpimath` types as [`NtStruct`]s, for the [`nt4`] crate.
+//! WPILib's `wpimath` types as [`NtStruct`](nt4::structs::NtStruct)s, for the [`nt4`] crate.
 //!
 //! Unofficial: not affiliated with or endorsed by WPILib or FIRST.
 //!
@@ -18,219 +18,26 @@
 //! # let _ = pose;
 //! ```
 
-use std::borrow::Cow;
+pub mod geometry;
+pub mod kinematics;
+pub mod shape;
+pub mod trajectory;
 
-use nt4::structs::{NtStruct, StructField, StructReader};
+pub use geometry::*;
+pub use kinematics::*;
+pub use shape::*;
+pub use trajectory::*;
 
 // Compile and run the code in README.md as doc tests.
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
 struct ReadmeDoctests;
 
-/// A 2D position (`Translation2d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Translation2d {
-    /// Meters.
-    pub x: f64,
-    /// Meters.
-    pub y: f64,
-}
-
-/// A 2D rotation (`Rotation2d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Rotation2d {
-    /// Radians, counterclockwise.
-    pub value: f64,
-}
-
-/// A 2D position and heading (`Pose2d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Pose2d {
-    /// Position.
-    pub translation: Translation2d,
-    /// Heading.
-    pub rotation: Rotation2d,
-}
-
-/// A 2D change of pose (`Transform2d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Transform2d {
-    /// Change in position.
-    pub translation: Translation2d,
-    /// Change in heading.
-    pub rotation: Rotation2d,
-}
-
-/// A 2D motion along an arc (`Twist2d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Twist2d {
-    /// Meters forward.
-    pub dx: f64,
-    /// Meters left.
-    pub dy: f64,
-    /// Radians.
-    pub dtheta: f64,
-}
-
-/// A 3D position (`Translation3d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Translation3d {
-    /// Meters.
-    pub x: f64,
-    /// Meters.
-    pub y: f64,
-    /// Meters.
-    pub z: f64,
-}
-
-/// A quaternion (`Quaternion`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Quaternion {
-    /// Real part.
-    pub w: f64,
-    /// i part.
-    pub x: f64,
-    /// j part.
-    pub y: f64,
-    /// k part.
-    pub z: f64,
-}
-
-/// A 3D rotation (`Rotation3d`), as a unit quaternion.
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Rotation3d {
-    /// The rotation.
-    pub q: Quaternion,
-}
-
-/// A 3D position and orientation (`Pose3d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Pose3d {
-    /// Position.
-    pub translation: Translation3d,
-    /// Orientation.
-    pub rotation: Rotation3d,
-}
-
-/// A 3D change of pose (`Transform3d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Transform3d {
-    /// Change in position.
-    pub translation: Translation3d,
-    /// Change in orientation.
-    pub rotation: Rotation3d,
-}
-
-/// A 3D motion along an arc (`Twist3d`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct Twist3d {
-    /// Meters.
-    pub dx: f64,
-    /// Meters.
-    pub dy: f64,
-    /// Meters.
-    pub dz: f64,
-    /// Radians about x.
-    pub rx: f64,
-    /// Radians about y.
-    pub ry: f64,
-    /// Radians about z.
-    pub rz: f64,
-}
-
-/// Robot-relative chassis velocities (`ChassisVelocities`, called
-/// `ChassisSpeeds` before 2027).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct ChassisVelocities {
-    /// Meters per second forward.
-    pub vx: f64,
-    /// Meters per second left.
-    pub vy: f64,
-    /// Radians per second counterclockwise.
-    pub omega: f64,
-}
-
-/// A swerve module's distance and angle (`SwerveModulePosition`).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct SwerveModulePosition {
-    /// Meters driven.
-    pub distance: f64,
-    /// Module angle.
-    pub angle: Rotation2d,
-}
-
-/// A swerve module's velocity and angle (`SwerveModuleVelocity`,
-/// called `SwerveModuleState` before 2027).
-#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
-pub struct SwerveModuleVelocity {
-    /// Meters per second.
-    pub velocity: f64,
-    /// Module angle.
-    pub angle: Rotation2d,
-}
-
-/// A swerve drive's module positions (`SwerveDriveKinematics<N>`), for
-/// `N` modules: struct `SwerveDriveKinematics__<N>`.
-///
-/// ```
-/// use nt4::structs::NtStruct;
-/// use nt4_wpimath::{SwerveDriveKinematics, Translation2d};
-///
-/// let half = 0.3;
-/// let kinematics = SwerveDriveKinematics {
-///     modules: [
-///         Translation2d { x: half, y: half },
-///         Translation2d { x: half, y: -half },
-///         Translation2d { x: -half, y: half },
-///         Translation2d { x: -half, y: -half },
-///     ],
-/// };
-/// assert_eq!(SwerveDriveKinematics::<4>::type_name(), "SwerveDriveKinematics__4");
-/// assert_eq!(SwerveDriveKinematics::<4>::schema(), "Translation2d modules[4]");
-/// # let _ = kinematics;
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SwerveDriveKinematics<const N: usize> {
-    /// Each module's position relative to the robot's center, in the
-    /// order the robot code gives them.
-    pub modules: [Translation2d; N],
-}
-
-impl<const N: usize> Default for SwerveDriveKinematics<N> {
-    fn default() -> Self {
-        Self {
-            modules: [Translation2d::default(); N],
-        }
-    }
-}
-
-// By hand: the derive doesn't take generic types.
-impl<const N: usize> NtStruct for SwerveDriveKinematics<N> {
-    const SIZE: usize = <[Translation2d; N] as StructField>::SIZE;
-    fn type_name() -> Cow<'static, str> {
-        format!("SwerveDriveKinematics__{N}").into()
-    }
-    fn schema() -> Cow<'static, str> {
-        format!("Translation2d modules[{N}]").into()
-    }
-    fn pack(&self, out: &mut Vec<u8>) {
-        StructField::pack(&self.modules, out);
-    }
-    fn unpack(data: &[u8]) -> Self {
-        Self {
-            modules: StructReader::new(data).read(),
-        }
-    }
-    fn for_each_nested(f: &mut dyn FnMut(&str, &str)) {
-        Translation2d::for_each_struct_schema(f);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     // Written by Claude.
     use super::*;
-    use nt4::structs::check;
+    use nt4::structs::{NtStruct, check};
 
     #[test]
     fn layouts_match_schemas() {
@@ -248,6 +55,18 @@ mod tests {
         check::<ChassisVelocities>().unwrap();
         check::<SwerveModulePosition>().unwrap();
         check::<SwerveModuleVelocity>().unwrap();
+        check::<ChassisAccelerations>().unwrap();
+        check::<SwerveModuleAcceleration>().unwrap();
+        check::<DifferentialDriveWheelPositions>().unwrap();
+        check::<DifferentialDriveWheelVelocities>().unwrap();
+        check::<DifferentialDriveWheelAccelerations>().unwrap();
+        check::<MecanumDriveWheelPositions>().unwrap();
+        check::<MecanumDriveWheelVelocities>().unwrap();
+        check::<MecanumDriveWheelAccelerations>().unwrap();
+        check::<HolonomicSample>().unwrap();
+        check::<DifferentialSample>().unwrap();
+        check::<Rectangle2d>().unwrap();
+        check::<Ellipse2d>().unwrap();
     }
 
     #[test]
@@ -288,6 +107,9 @@ mod tests {
         assert_eq!(<Pose3d as NtStruct>::SIZE, 56);
         assert_eq!(<Twist3d as NtStruct>::SIZE, 48);
         assert_eq!(<SwerveModuleVelocity as NtStruct>::SIZE, 16);
+        assert_eq!(<HolonomicSample as NtStruct>::SIZE, 80);
+        assert_eq!(<DifferentialSample as NtStruct>::SIZE, 96);
+        assert_eq!(<Rectangle2d as NtStruct>::SIZE, 40);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # nt4-wpimath
 
-WPILib's `wpimath` geometry and kinematics types as NetworkTables struct
-topics, for the [`nt4`](https://docs.rs/nt4) crate. Each type has the same
+WPILib's `wpimath` geometry, kinematics, trajectory and shape types as
+NetworkTables struct topics, for the [`nt4`](https://docs.rs/nt4) crate. Each type has the same
 name, fields, units and struct schema as WPILib 2027's `wpimath`, so robot
 code, AdvantageScope and Elastic read them as their own.
 
@@ -26,10 +26,15 @@ which WPILib year each release follows.
 
 ## Which types
 
-Geometry (`Translation2d` to `Twist3d`, `Quaternion`), drive state
-(`ChassisVelocities`, `SwerveModulePosition`, `SwerveModuleVelocity`) and
-`SwerveDriveKinematics<N>`. More drive state, trajectory samples and
-shapes are planned. CI checks every type here against WPILib's own
+- Geometry: `Translation2d` to `Twist3d`, `Quaternion`.
+- Drive state: `ChassisVelocities`, `ChassisAccelerations`, swerve module
+  positions, velocities and accelerations, differential and mecanum wheel
+  positions, velocities and accelerations, and `SwerveDriveKinematics<N>`.
+- Trajectory samples: `HolonomicSample`, `DifferentialSample`.
+- Shapes: `Rectangle2d`, `Ellipse2d`.
+
+They're in modules by group (`nt4_wpimath::kinematics`, ...) and all
+re-exported at the top. CI checks every type here against WPILib's own
 definitions (C++, Java and RobotPy) at a pinned allwpilib commit.
 
 Not every WPILib struct is here, on purpose. Controller gains, motor

@@ -7,12 +7,13 @@
 //! See [`NtStruct`](macro@NtStruct) for what it generates.
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
+use syn::parse::Parse;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, Data, DataEnum, DeriveInput, Error, Expr, ExprLit, ExprUnary, Fields, Ident, Lit,
-    LitStr, Path, Result, Type, UnOp, parse_macro_input,
+    LitStr, Path, Result, Token, Type, UnOp, parse_macro_input,
 };
 
 /// Implements `nt4::structs::NtStruct` for a struct with named fields, or
@@ -79,8 +80,16 @@ use syn::{
 /// - `#[nt4(schema = "..")]`: the schema, written out, instead of the one
 ///   built from the fields. The layout and nested schemas still come from
 ///   the fields; `nt4::structs::check` tests that they agree.
+/// - `#[nt4(nested(A, B))]`: the structs whose schemas this one registers
+///   before its own, in place of the ones its fields use, as a
+///   hand-written `ForEachNested` lists them (WPILib's `DifferentialSample`
+///   writes out `HolonomicSample`'s fields but registers
+///   `HolonomicSample`).
 /// - `#[nt4(crate = "..")]`: the path to the `nt4` crate, if it isn't
 ///   `::nt4` (say, when it is renamed in `Cargo.toml`).
+///
+/// And on a field, `#[nt4(rename = "..")]`: its name in the schema, when
+/// that isn't the Rust name (`xWidth` for `x_width`).
 ///
 /// ```
 /// use nt4::structs::NtStruct;
@@ -113,6 +122,8 @@ struct Options {
     name: Option<LitStr>,
     schema: Option<LitStr>,
     krate: Option<Path>,
+    /// `nested(A, B)`: the nested structs, in place of the fields'.
+    nested: Option<(Span, Vec<Type>)>,
 }
 
 fn options(attrs: &[Attribute]) -> Result<Options> {
@@ -130,8 +141,18 @@ fn options(attrs: &[Attribute]) -> Result<Options> {
                 }
                 out.krate = Some(lit.parse()?);
                 return Ok(());
+            } else if meta.path.is_ident("nested") {
+                if out.nested.is_some() {
+                    return Err(meta.error("`nested` is given twice"));
+                }
+                let content;
+                syn::parenthesized!(content in meta.input);
+                let types = content.parse_terminated(Type::parse, Token![,])?;
+                out.nested = Some((meta.path.span(), types.into_iter().collect()));
+                return Ok(());
             } else {
-                return Err(meta.error("unknown nt4 option; expected `name`, `schema` or `crate`"));
+                return Err(meta
+                    .error("unknown nt4 option; expected `name`, `schema`, `nested` or `crate`"));
             };
             if slot.is_some() {
                 return Err(meta.error("this option is given twice"));
@@ -143,7 +164,7 @@ fn options(attrs: &[Attribute]) -> Result<Options> {
     Ok(out)
 }
 
-/// `#[nt4(..)]` is only for the type, for now.
+/// `#[nt4(..)]` isn't taken on enum variants.
 fn no_options(attrs: &[Attribute], on: &str) -> Result<()> {
     match attrs.iter().find(|a| a.path().is_ident("nt4")) {
         Some(attr) => Err(Error::new_spanned(
@@ -152,6 +173,24 @@ fn no_options(attrs: &[Attribute], on: &str) -> Result<()> {
         )),
         None => Ok(()),
     }
+}
+
+/// A field's `#[nt4(rename = "..")]`, if any.
+fn field_rename(attrs: &[Attribute]) -> Result<Option<LitStr>> {
+    let mut rename = None;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("nt4")) {
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("rename") {
+                return Err(meta.error("unknown nt4 field option; expected `rename`"));
+            }
+            if rename.is_some() {
+                return Err(meta.error("`rename` is given twice"));
+            }
+            rename = Some(meta.value()?.parse()?);
+            Ok(())
+        })?;
+    }
+    Ok(rename)
 }
 
 /// An identifier as it appears in a schema: without `r#`.
@@ -195,13 +234,13 @@ fn expand_struct(
     name: &LitStr,
     fields: &Fields,
 ) -> Result<TokenStream2> {
-    let named: Vec<(&Ident, &Type)> = match fields {
+    let named: Vec<(&Ident, &Type, Option<LitStr>)> = match fields {
         Fields::Named(f) => f
             .named
             .iter()
             .map(|f| {
-                no_options(&f.attrs, "field")?;
-                Ok((f.ident.as_ref().expect("named field"), &f.ty))
+                let rename = field_rename(&f.attrs)?;
+                Ok((f.ident.as_ref().expect("named field"), &f.ty, rename))
             })
             .collect::<Result<_>>()?,
         Fields::Unit => Vec::new(),
@@ -216,9 +255,17 @@ fn expand_struct(
     let ident = &input.ident;
     let s = quote!(#krate::structs);
     let p = quote!(#krate::structs::__private);
-    let idents: Vec<_> = named.iter().map(|(i, _)| *i).collect();
-    let types: Vec<_> = named.iter().map(|(_, t)| *t).collect();
-    let field_names: Vec<_> = idents.iter().map(|i| schema_ident(i)).collect();
+    let idents: Vec<_> = named.iter().map(|(i, _, _)| *i).collect();
+    let types: Vec<_> = named.iter().map(|(_, t, _)| *t).collect();
+    let field_names: Vec<_> = named
+        .iter()
+        .map(|(i, _, rename)| {
+            rename
+                .as_ref()
+                .map(LitStr::value)
+                .unwrap_or_else(|| schema_ident(i))
+        })
+        .collect();
     let type_strings: Vec<_> = types.iter().map(|t| quote!(#t).to_string()).collect();
 
     let schema = match &opts.schema {
@@ -227,6 +274,14 @@ fn expand_struct(
             let mut schema = #p::String::new();
             #(#p::field::<#types>(&mut schema, #field_names, #type_strings);)*
             #p::Cow::Owned(schema)
+        },
+    };
+    let nested = match &opts.nested {
+        Some((_, list)) => quote! {
+            #p::nested(f, &[#(<#list as #s::NtStruct>::for_each_struct_schema,)*]);
+        },
+        None => quote! {
+            #p::nested(f, &[#(<#types as #s::StructField>::for_each_field_schema,)*]);
         },
     };
     let unpack = match fields {
@@ -267,7 +322,7 @@ fn expand_struct(
             }
 
             fn for_each_nested(f: &mut dyn FnMut(&str, &str)) {
-                #p::nested(f, &[#(<#types as #s::StructField>::for_each_field_schema,)*]);
+                #nested
             }
         }
     })
@@ -308,6 +363,12 @@ fn expand_enum(
         return Err(Error::new_spanned(
             &input.ident,
             "NtStruct can't be derived for an enum with no variants",
+        ));
+    }
+    if let Some((span, _)) = &opts.nested {
+        return Err(Error::new(
+            *span,
+            "`nested` is for structs; an enum has no nested structs",
         ));
     }
     let mut next: i64 = 0;
@@ -488,12 +549,41 @@ mod tests {
     }
 
     #[test]
+    fn rename_and_nested() {
+        let out = expanded("struct P { #[nt4(rename = \"xWidth\")] x_width: f64 }");
+        assert!(out.contains("\"xWidth\""), "{out}");
+        assert!(!out.contains("\"x_width\""), "{out}");
+        let out = expanded("#[nt4(nested(H, crate::G))] struct P { v: f64 }");
+        assert!(
+            out.contains("< H as :: nt4 :: structs :: NtStruct > :: for_each_struct_schema"),
+            "{out}"
+        );
+        assert!(
+            out.contains("< crate :: G as :: nt4 :: structs :: NtStruct >"),
+            "{out}"
+        );
+        assert!(!out.contains("for_each_field_schema"), "{out}");
+        // An empty list: no nested structs at all.
+        assert!(expanded("#[nt4(nested())] struct P { v: f64 }").contains("nested (f , & [])"));
+    }
+
+    #[test]
     fn refuses_bad_options() {
         assert!(error("#[nt4(size = 3)] struct A { x: u8 }").contains("unknown nt4 option"));
         assert!(error("#[nt4(name = \"A\", name = \"B\")] struct A { x: u8 }").contains("twice"));
         assert!(error("#[nt4(name = 3)] struct A { x: u8 }").contains("expected string literal"));
         assert!(error("#[nt4(crate = \"a\", crate = \"b\")] struct A { x: u8 }").contains("twice"));
-        assert!(error("struct A { #[nt4(name = \"y\")] x: u8 }").contains("not on a field"));
+        assert!(
+            error("struct A { #[nt4(name = \"y\")] x: u8 }").contains("unknown nt4 field option")
+        );
+        assert!(
+            error("struct A { #[nt4(rename = \"y\", rename = \"z\")] x: u8 }").contains("twice")
+        );
+        assert!(error("#[nt4(nested(B), nested(C))] struct A { x: u8 }").contains("twice"));
+        assert!(
+            error("#[nt4(nested(B))] #[derive(Default)] enum E { #[default] A }")
+                .contains("`nested` is for structs")
+        );
         assert!(
             error("#[derive(Default)] enum E { #[nt4(name = \"y\")] A }")
                 .contains("not on a variant")

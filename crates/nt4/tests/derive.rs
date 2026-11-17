@@ -396,3 +396,72 @@ fn hygiene() {
     let schema: Cow<'static, str> = <hygiene::Lonely as NtStruct>::schema();
     assert_eq!(schema, "uint32 v");
 }
+
+/// A schema name that isn't the Rust name, as WPILib's camelCase fields.
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+struct Shape {
+    center: derived::Pose2d,
+    #[nt4(rename = "xWidth")]
+    x_width: f64,
+    #[nt4(rename = "yWidth")]
+    y_width: f64,
+}
+
+#[test]
+fn rename_sets_the_schema_name() {
+    assert_eq!(Shape::schema(), "Pose2d center;double xWidth;double yWidth");
+    check::<Shape>().unwrap();
+    let s = Shape {
+        x_width: 1.0,
+        y_width: 2.0,
+        ..Default::default()
+    };
+    assert_eq!(<Shape as NtStruct>::unpack(&packed(&s)), s);
+}
+
+/// The fields of `Shape` written out, but registering `Shape` itself as
+/// nested, as WPILib's `DifferentialSample` does with `HolonomicSample`.
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+#[nt4(nested(Shape))]
+struct Flattened {
+    center: derived::Pose2d,
+    #[nt4(rename = "xWidth")]
+    x_width: f64,
+    #[nt4(rename = "yWidth")]
+    y_width: f64,
+    extra: f64,
+}
+
+#[test]
+fn nested_lists_the_nested_structs() {
+    let names: Vec<String> = schemas::<Flattened>().into_iter().map(|(t, _)| t).collect();
+    assert_eq!(
+        names,
+        [
+            "struct:Translation2d",
+            "struct:Rotation2d",
+            "struct:Pose2d",
+            "struct:Shape",
+            "struct:Flattened"
+        ]
+    );
+    assert_eq!(
+        Flattened::schema(),
+        "Pose2d center;double xWidth;double yWidth;double extra"
+    );
+    check::<Flattened>().unwrap();
+}
+
+/// `nested()` with nothing in it: no nested schemas, so `check` reports
+/// the one the schema needs.
+#[derive(NtStruct, Debug, Clone, Copy, PartialEq, Default)]
+#[nt4(nested())]
+struct ForgotNested {
+    pose: derived::Pose2d,
+}
+
+#[test]
+fn check_catches_a_missing_nested_schema() {
+    assert_eq!(schemas::<ForgotNested>().len(), 1);
+    assert!(check::<ForgotNested>().is_err());
+}

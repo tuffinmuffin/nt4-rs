@@ -30,7 +30,17 @@ in README.md.
   schemas of the struct in a field. Using a type that isn't a
   `StructField` as a field now says so in the compiler error.
 - `nt4-wpimath`: `SwerveDriveKinematics<N>` (`struct:SwerveDriveKinematics__N`,
-  the module positions), generic over the number of modules.
+  the module positions), generic over the number of modules;
+  `ChassisAccelerations`; `SwerveModuleAcceleration` (struct
+  `SwerveModuleAccelerations`, as WPILib names it); differential and
+  mecanum wheel positions, velocities and accelerations;
+  `HolonomicSample` and `DifferentialSample`; `Rectangle2d` and
+  `Ellipse2d`. The types are in modules by group (`geometry`,
+  `kinematics`, `trajectory`, `shape`), re-exported at the crate root.
+- `#[derive(NtStruct)]`: `#[nt4(rename = "..")]` on a field gives its
+  schema name (WPILib's camelCase), and `#[nt4(nested(A, ..))]` lists the
+  nested structs in place of the fields' (as `DifferentialSample`
+  registers `HolonomicSample`).
 - `nt4-wpimath`'s types use the derive; their schemas, sizes and nested
   schema order are unchanged. `scripts/schema_audit.py`, run in CI, checks
   them against WPILib's own struct definitions at the pinned allwpilib

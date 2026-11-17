@@ -397,8 +397,8 @@ check is enough.
       nested schemas; where it and the parsed headers differ, that's a
       note. It runs in CI's `upstream-audit` job at `ALLWPILIB_COMMIT`
       with RobotPy, and informationally against allwpilib `main` without.
-      At the pinned commit: 46 types; ours are 15 of them, 12 to do, 19
-      `na` (see item 4). RobotPy has
+      At the pinned commit: 46 types; ours are 27 of them, 19 `na` (see
+      item 4). RobotPy has
       36 (no generic, `TrapezoidProfile*` or `ExponentialProfile*` ones),
       and all 36 agree with the parsed C++, which checks the parser too. The
       hand-copied `schemas_match_wpimath` test went, since the audit
@@ -426,15 +426,18 @@ check is enough.
         `<4>`, each is matched to WPILib's pattern, and WPILib's schema
         is filled in with the parameters. (RobotPy has no generic types,
         so for these the check is against the parsed C++ only.)
-      - To do (the 12 `todo` lines): `ChassisAccelerations`,
-        `SwerveModuleAccelerations`, differential and mecanum wheel
-        positions, velocities and accelerations, `HolonomicSample`,
-        `DifferentialSample`, `Rectangle2d`, `Ellipse2d`. All derive
-        directly except `DifferentialSample`: its schema writes out
-        `HolonomicSample`'s fields (`double time;Pose2d pose;...`) but
-        C++, Java and RobotPy still register `HolonomicSample` as a
-        nested schema, so it needs a derive option for an extra nested
-        type (or a hand implementation).
+      - Done: the 12 types that were `todo`: `ChassisAccelerations`,
+        `SwerveModuleAcceleration` (WPILib's struct name is
+        `SwerveModuleAccelerations`, with an s, in C++, Java and RobotPy),
+        differential and mecanum wheel positions, velocities and
+        accelerations, `HolonomicSample`, `DifferentialSample`,
+        `Rectangle2d`, `Ellipse2d`. Two derive options came with them:
+        `#[nt4(rename = "..")]` on a field (WPILib's camelCase names, e.g.
+        `xWidth`) and `#[nt4(nested(..))]` (`DifferentialSample` writes out
+        `HolonomicSample`'s fields but registers `HolonomicSample`). The
+        crate is now in modules by group, re-exported at the root. Audit:
+        27 of WPILib's 46 types are ours and all match C++ and RobotPy; 0
+        `todo`, 19 `na`.
    5. A weekly CI job that runs both audits against allwpilib's newest
       release and opens an issue when something changed.
    6. Releases: 0.1.0 is on crates.io, so the release workflow can move

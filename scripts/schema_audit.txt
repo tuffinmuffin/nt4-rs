@@ -1,27 +1,15 @@
 # WPILib struct types nt4-wpimath doesn't have, for scripts/schema_audit.py.
 # One per line: `<name> todo|na  # reason`. Generic types are written with
-# their C++ parameters in angle brackets, as the audit prints them.
+# their C++ parameters in angle brackets, as the audit prints them. `todo`
+# is for one planned but not yet added.
 #
 # nt4-wpimath carries the types Rust programs publish or read: geometry,
-# drive state, trajectory samples, shapes, and swerve kinematics. The rest
-# are marked `na`: read them with nt4_proto::structs (which decodes any
-# struct from its /.schema/ topic at run time), or derive your own with
-# #[derive(NtStruct)]. Any of them can move to `todo` if someone asks.
+# drive state, trajectory samples, shapes, and swerve kinematics (all of
+# them since 0.2.0). The rest are marked `na`: read them with
+# nt4_proto::structs (which decodes any struct from its /.schema/ topic at
+# run time), or derive your own with #[derive(NtStruct)]. Any of them can
+# move to `todo` if someone asks.
 # Decided 2026-11-16.
-
-# To add (STATUS.md, 0.2.0 item 4).
-ChassisAccelerations                 todo
-SwerveModuleAccelerations            todo
-DifferentialDriveWheelAccelerations  todo
-DifferentialDriveWheelPositions      todo
-DifferentialDriveWheelVelocities     todo
-MecanumDriveWheelAccelerations       todo
-MecanumDriveWheelPositions           todo
-MecanumDriveWheelVelocities          todo
-HolonomicSample                      todo
-DifferentialSample                   todo  # also registers HolonomicSample as nested; needs a derive option
-Rectangle2d                          todo
-Ellipse2d                            todo
 
 # Drive configuration other than swerve.
 DifferentialDriveKinematics          na  # rarely sent; derive your own (double trackwidth)
