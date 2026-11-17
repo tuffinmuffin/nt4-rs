@@ -959,7 +959,7 @@ impl<'a> DynamicStruct<'a> {
         if size == 0 {
             return data.is_empty().then(Vec::new);
         }
-        if !data.len().is_multiple_of(size) {
+        if data.len() % size != 0 {
             return None;
         }
         data.chunks_exact(size)

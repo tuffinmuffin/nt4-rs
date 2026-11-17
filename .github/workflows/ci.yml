@@ -67,10 +67,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.95
+      - uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
-      # nt4-fuzz is a dev tool (publish = false) with no MSRV guarantee.
-      - run: cargo test --workspace --all-features --exclude nt4-fuzz
+      # nt4-fuzz and nt4-perf are dev tools (publish = false) with their own,
+      # newer rust-version (1.91 and 1.88).
+      - run: cargo test --workspace --all-features --exclude nt4-fuzz --exclude nt4-perf
 
   # Our client against a real ntcore server, and real ntcore clients against
   # our server (pyntcore). Pin the version so a

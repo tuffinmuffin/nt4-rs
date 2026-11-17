@@ -5,7 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-rust-version.workspace = true
+# Dev tool, not published: needs newer Rust than the libraries (let chains,
+# str::floor_char_boundary), so it keeps its own minimum.
+rust-version = "1.91"
 publish = false
 
 [dependencies]

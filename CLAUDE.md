@@ -59,6 +59,10 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
 - Tests written by Claude say so in a comment.
 - Public items need docs (`missing_docs` is on); add a `///` example to
   anything users call directly.
+- The published crates support Rust 1.85 (`rust-version`, checked by the CI
+  `msrv` job): no let chains (`if let .. && let ..`, 1.88) or newer std
+  APIs. Clippy's `incompatible_msrv` flags the APIs. The dev tools
+  (`nt4-fuzz`, `nt4-perf`) have their own, newer `rust-version`.
 
 ## Commands
 

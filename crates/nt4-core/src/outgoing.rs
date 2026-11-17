@@ -434,14 +434,16 @@ impl<M: TextMessage> OutgoingQueue<M> {
             SendMode::Normal => {
                 let info = *self.id_map.entry(id).or_default();
                 let queue = &mut self.queues[info.queue_index];
-                if let Some(pos) = info.value_pos
-                    && let Some(elem) = queue.msgs.get_mut(pos)
-                    && elem.id == id
-                    && let Item::Value {
-                        time_us: old_time,
-                        value: old_value,
-                    } = &mut elem.item
-                {
+                // This id's value already waiting in the queue, if any.
+                let queued = info
+                    .value_pos
+                    .and_then(|pos| queue.msgs.get_mut(pos))
+                    .filter(|elem| elem.id == id)
+                    .and_then(|elem| match &mut elem.item {
+                        Item::Value { time_us, value } => Some((time_us, value)),
+                        _ => None,
+                    });
+                if let Some((old_time, old_value)) = queued {
                     // Only replace with a newer (or equal) timestamp.
                     if *old_time == 0 || time_us >= *old_time {
                         let old_size = value_size(old_value);

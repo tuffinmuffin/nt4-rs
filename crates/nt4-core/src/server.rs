@@ -707,9 +707,10 @@ impl ServerCore {
         let now_ms = to_ms(now_us);
         if r.version == ProtocolVersion::V4_1 && now_ms >= r.next_ping_ms {
             // No data for a while (we should at least get pongs).
-            if let Some(sent) = r.ping_sent_ms
-                && now_ms > r.last_received_ms.unwrap_or(sent) + u64::from(PING_TIMEOUT_MS)
-            {
+            let silent = r.ping_sent_ms.is_some_and(|sent| {
+                now_ms > r.last_received_ms.unwrap_or(sent) + u64::from(PING_TIMEOUT_MS)
+            });
+            if silent {
                 self.close(id.0, "connection timed out".into());
                 return;
             }
@@ -1309,9 +1310,7 @@ impl ServerCore {
     ) -> usize {
         if let Some(&id) = self.topic_names.get(name) {
             let current = &self.topic(id).ty;
-            if let Some(slot) = client
-                && ty != *current
-            {
+            if let Some(slot) = client.filter(|_| ty != *current) {
                 let msg = format!(
                     "client {} publish '{name}' conflicting type '{ty}' (currently '{current}')",
                     self.client(slot).name
@@ -1427,10 +1426,10 @@ impl ServerCore {
         // clients that only published; with ids reused, a stale flag would
         // hide the next topic with this id. Forget it everywhere.
         for client in self.clients.iter_mut().flatten() {
-            if client.announce_sent.remove(&topic) == Some(true)
-                && let Some(r) = &mut client.remote
-            {
-                r.outgoing.erase_id(topic as i32);
+            if client.announce_sent.remove(&topic) == Some(true) {
+                if let Some(r) = &mut client.remote {
+                    r.outgoing.erase_id(topic as i32);
+                }
             }
         }
 

@@ -21,7 +21,10 @@ per second, and no math. Convert to your own geometry types as needed.
 
 This crate is built only on `nt4`'s public `NtStruct` trait, and follows
 WPILib's yearly renames (`ChassisSpeeds` became `ChassisVelocities` in
-2027) on its own. Its version says which WPILib year it matches.
+2027) on its own. This release matches WPILib 2027; the changelog says
+which WPILib year each release follows.
+
+From a clone of the [repository](https://github.com/tuffinmuffin/nt4-rs):
 
 | Example | What it does |
 | --- | --- |

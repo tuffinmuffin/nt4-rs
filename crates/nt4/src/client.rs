@@ -136,10 +136,10 @@ impl Shared {
     /// each to [`Client::events`] listeners.
     fn dispatch_events(&self, state: &mut State) {
         while let Some(event) = state.core.poll_event() {
-            if let Event::Value { name, value, .. } = &event
-                && let Some(w) = state.watchers.get(&**name)
-            {
-                w.send_replace(Some(value.clone()));
+            if let Event::Value { name, value, .. } = &event {
+                if let Some(w) = state.watchers.get(&**name) {
+                    w.send_replace(Some(value.clone()));
+                }
             }
             // Drop listeners whose `Events` was dropped.
             state.listeners.retain(|l| l.send(event.clone()).is_ok());
