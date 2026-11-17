@@ -63,8 +63,10 @@ The server's own code publishes and subscribes through it too.
 The behavior follows WPILib's ntcore, and the tests port ntcore's
 `ServerImplTest`, `NetworkOutgoingQueueTest` and `TimeSyncTest`.
 
-Example (advanced): `cargo run -p nt4-core --example custom_driver -- 127.0.0.1 /`
-drives the client core by hand, to show what a runtime has to do. For normal
+Example (advanced), from a clone of the
+[repository](https://github.com/tuffinmuffin/nt4-rs):
+`cargo run -p nt4-core --example custom_driver -- 127.0.0.1 /` drives the
+client core by hand, to show what a runtime has to do. For normal
 use, see the `nt4` crate's examples.
 
 License: MIT. Ported WPILib tests keep WPILib's BSD license

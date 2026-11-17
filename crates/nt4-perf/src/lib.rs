@@ -71,7 +71,7 @@ pub fn topic(i: usize) -> (String, NtType, Value) {
         160..170 => (
             format!("/robot/periodic/b{i}"),
             NtType::Boolean,
-            Value::Boolean(i.is_multiple_of(2)),
+            Value::Boolean(i % 2 == 0),
         ),
         170..180 => (
             format!("/robot/periodic/a{i}"),

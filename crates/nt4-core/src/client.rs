@@ -653,9 +653,8 @@ impl ClientCore {
             } => {
                 let name: Arc<str> = name.into();
                 // A re-announce under a new id replaces the old one.
-                if let Some(old) = conn.topic_ids.insert(name.clone(), id)
-                    && old != id
-                {
+                let replaced = conn.topic_ids.insert(name.clone(), id);
+                if let Some(old) = replaced.filter(|&old| old != id) {
                     conn.topics.remove(&old);
                 }
                 conn.topics.insert(
@@ -697,9 +696,11 @@ impl ClientCore {
             ServerMessage::Properties { name, update, ack } => {
                 // Acks echo our own change, which is already applied.
                 if !ack {
-                    if let Some(id) = conn.topic_ids.get(name.as_str())
-                        && let Some(topic) = conn.topics.get_mut(id)
-                    {
+                    let topic = conn
+                        .topic_ids
+                        .get(name.as_str())
+                        .and_then(|id| conn.topics.get_mut(id));
+                    if let Some(topic) = topic {
                         apply_update(&mut topic.properties, &update);
                     }
                     for p in self.publishers.values_mut().filter(|p| p.name == name) {
@@ -813,10 +814,10 @@ impl ClientCore {
             ProtocolVersion::V4_1 => {
                 if now_ms >= conn.next_ws_ping_ms {
                     // No data for a while (we should at least get pongs).
-                    if let Some(sent) = conn.ws_ping_sent_ms
-                        && now_ms
-                            > conn.last_received_ms.unwrap_or(sent) + u64::from(PING_TIMEOUT_MS)
-                    {
+                    let silent = conn.ws_ping_sent_ms.is_some_and(|sent| {
+                        now_ms > conn.last_received_ms.unwrap_or(sent) + u64::from(PING_TIMEOUT_MS)
+                    });
+                    if silent {
                         self.timed_out();
                         return;
                     }

@@ -155,10 +155,10 @@ impl State {
     /// every connection that has frames to send.
     fn settle(&mut self) {
         while let Some(event) = self.core.poll_event() {
-            if let ServerEvent::Value { name, value, .. } = &event
-                && let Some(w) = self.watchers.get(&**name)
-            {
-                w.send_replace(Some(value.clone()));
+            if let ServerEvent::Value { name, value, .. } = &event {
+                if let Some(w) = self.watchers.get(&**name) {
+                    w.send_replace(Some(value.clone()));
+                }
             }
             // Drop listeners whose `Events` was dropped.
             self.listeners.retain(|l| l.send(event.clone()).is_ok());
@@ -213,10 +213,10 @@ impl Drop for StopGuard {
         // ntcore saves only on its 1 s timer; save what changed since, so
         // the last second isn't lost. It's a small file, written here
         // rather than in a task the runtime may no longer run.
-        if let Some((shared, path)) = &self.persist
-            && let Some(data) = shared.take_persistent()
-        {
-            let _ = save_persistent(path, &data);
+        if let Some((shared, path)) = &self.persist {
+            if let Some(data) = shared.take_persistent() {
+                let _ = save_persistent(path, &data);
+            }
         }
     }
 }
@@ -564,11 +564,10 @@ fn platform_newlines(data: &str) -> String {
 fn read_persistent(path: &Path) -> (String, Vec<String>) {
     let mut notes = Vec::new();
     let bck = with_suffix(path, ".bck");
-    if !path.exists()
-        && bck.exists()
-        && let Err(e) = std::fs::rename(&bck, path)
-    {
-        notes.push(format!("failed to restore backup '{}': {e}", bck.display()));
+    if !path.exists() && bck.exists() {
+        if let Err(e) = std::fs::rename(&bck, path) {
+            notes.push(format!("failed to restore backup '{}': {e}", bck.display()));
+        }
     }
     match std::fs::read(path) {
         // Bad UTF-8 becomes replacement characters (and those entries

@@ -312,7 +312,7 @@ impl<T: NtStruct> NtValue for Vec<T> {
         if T::SIZE == 0 {
             return data.is_empty().then(Vec::new);
         }
-        if !data.len().is_multiple_of(T::SIZE) {
+        if data.len() % T::SIZE != 0 {
             return None;
         }
         Some(data.chunks_exact(T::SIZE).map(NtStruct::unpack).collect())

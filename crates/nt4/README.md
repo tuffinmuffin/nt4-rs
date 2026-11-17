@@ -114,7 +114,8 @@ reports every announcement, value, connection change and time sync update.
 
 Start a server first (robot code in simulation, or
 `python -c "import ntcore,time; i=ntcore.NetworkTableInstance.getDefault(); i.startServer(); time.sleep(1e9)"`
-with `pip install pyntcore`), then:
+with `pip install pyntcore`), then from a clone of the
+[repository](https://github.com/tuffinmuffin/nt4-rs):
 
 | Example | What it does |
 | --- | --- |
@@ -146,7 +147,7 @@ To run the protocol on another runtime, use `nt4-core` directly (its
 NT 4.1, with fallback to 4.0, and the RTT subprotocol on the server.
 Tested against ntcore 2027 (pyntcore 2027.0.0a8);
 ntcore 2026 and older are not tracked. Minimum Rust
-version 1.95.
+version 1.85.
 
 ## License
 
