@@ -13,7 +13,7 @@ Where nt4-rs stands, so work can be picked up from any machine. Last updated
 | 3 | `nt4`: tokio `Client`, typed publishers and subscribers, pyntcore interop tests, load benchmark, decoder fuzzer, crates.io readiness | Merged (PRs #3 to #7) |
 | 4 | `ServerCore` in `nt4-core`, port of ntcore `ServerImplTest` | Merged (PR #8) |
 | 5 | `nt4` server feature (tokio), persistence file, interop with pyntcore clients | Merged (PR #9) |
-| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); 0.1.0 published 2026-11-16; 0.2.0 ready to tag |
+| 6 | Structs and schemas, then release and publish to crates.io | Struct and protobuf code merged (PR #10); 0.1.0 and 0.2.0 published 2026-11-16 |
 
 ## Milestone 4: `ServerCore`
 
@@ -448,14 +448,15 @@ check is enough.
       commits behind the pin, is missing five `DynamicStructTest` cases),
       which isn't news. The sparse checkout both workflows use is
       `scripts/fetch_allwpilib.sh`.
-   6. Releases: 0.1.0 is on crates.io, so the release workflow can move
-      to crates.io trusted publishing (`rust-lang/crates-io-auth-action`,
-      a short-lived token per run; set up under each crate's settings on
-      crates.io for this repo, `release.yml` and the `Deploy` environment).
-      But `nt4-derive` is new in 0.2.0, and trusted publishing can only be
-      set up for a crate that already exists, so 0.2.0 still publishes
-      with `CARGO_REGISTRY_TOKEN`. Switch after 0.2.0, then delete the
-      token.
+   6. Released: 0.2.0 is on crates.io (tag `v0.2.0`, published by the
+      release workflow on 2026-11-16, `nt4-derive` new), with the GitHub
+      release from the changelog. The release workflow now publishes with
+      crates.io trusted publishing (`rust-lang/crates-io-auth-action`, a
+      token per run): each of the five crates trusts `release.yml` of this
+      repository in the `Deploy` environment, set up under the crate's
+      Settings > Trusted Publishing on crates.io. Once that is set up for
+      all five, delete the `CARGO_REGISTRY_TOKEN` secret (and revoke the
+      token on crates.io).
 4. **`nt4-photon`, before publishing it** (it is `publish = false` and
    out of `release.yml`'s `CRATES`; nt4 and the other crates don't need
    it):
