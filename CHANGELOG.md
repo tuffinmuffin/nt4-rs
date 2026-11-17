@@ -1,8 +1,10 @@
 # Changelog
 
-All three crates (`nt4-proto`, `nt4-core`, `nt4`) share one version number.
+The four crates (`nt4-proto`, `nt4-core`, `nt4`, `nt4-wpimath`) share one
+version number. Pushing the tag `v<version>` publishes them; see "Releasing"
+in README.md.
 
-## Unreleased (0.1.0)
+## 0.1.0 (2026-11-16)
 
 First release.
 
