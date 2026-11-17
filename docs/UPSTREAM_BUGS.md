@@ -103,6 +103,31 @@ unless noted. Earlier write-up of the two parser bugs:
   `a_rate_limited_flush_is_kept_for_the_next_send` in
   `crates/nt4-core/tests/outgoing_queue.rs`.
 
+## 9. C++ and Java struct schemas disagree
+
+Found by `scripts/schema_audit.py`, which reads both. Type names match;
+these schemas don't:
+
+- `ArmFeedforward`, `ElevatorFeedforward`: Java
+  (`wpimath/src/main/java/org/wpilib/math/controller/struct/ArmFeedforwardStruct.java`,
+  `ElevatorFeedforwardStruct.java`) has
+  `double ks;double kg;double kv;double ka;double dt`, C++
+  (`ArmFeedforwardStruct.hpp`, `ElevatorFeedforwardStruct.hpp`) has no
+  `dt`. The sizes differ (40 against 32 bytes), so a value published from
+  Java can't be read as the C++ type and the other way round, though both
+  call it `struct:ArmFeedforward`.
+- `Ellipse2d`, `Rectangle2d`: Java's schema has a space after the second
+  `;` (`double xSemiAxis; double ySemiAxis`). It parses the same, but the
+  `/.schema/` topic differs depending on which language published first.
+- `ControlWord`: C++ (`hal/src/main/native/include/wpi/hal/DriverStationTypes.hpp`)
+  joins two literals into `...utility=3}uint64 robotMode:2;`, without the
+  space Java has. Parses the same; same `/.schema/` difference.
+- Fix: one schema per type, and a test in allwpilib comparing the C++ and
+  Java schemas.
+- nt4: nt4-wpimath follows C++. RobotPy 2027.0.0a8 (built on the C++)
+  reports the C++ schemas for all five, so the `dt` mismatch is between
+  Java and everything else.
+
 ## Also worth mentioning (spec, not code)
 
 - `ntcore/doc/networktables4.adoc`, data types table: the `protobuf` row

@@ -18,7 +18,9 @@
 //! # let _ = pose;
 //! ```
 
-use nt4::structs::NtStruct;
+use std::borrow::Cow;
+
+use nt4::structs::{NtStruct, StructField, StructReader};
 
 // Compile and run the code in README.md as doc tests.
 #[doc = include_str!("../README.md")]
@@ -167,6 +169,63 @@ pub struct SwerveModuleVelocity {
     pub angle: Rotation2d,
 }
 
+/// A swerve drive's module positions (`SwerveDriveKinematics<N>`), for
+/// `N` modules: struct `SwerveDriveKinematics__<N>`.
+///
+/// ```
+/// use nt4::structs::NtStruct;
+/// use nt4_wpimath::{SwerveDriveKinematics, Translation2d};
+///
+/// let half = 0.3;
+/// let kinematics = SwerveDriveKinematics {
+///     modules: [
+///         Translation2d { x: half, y: half },
+///         Translation2d { x: half, y: -half },
+///         Translation2d { x: -half, y: half },
+///         Translation2d { x: -half, y: -half },
+///     ],
+/// };
+/// assert_eq!(SwerveDriveKinematics::<4>::type_name(), "SwerveDriveKinematics__4");
+/// assert_eq!(SwerveDriveKinematics::<4>::schema(), "Translation2d modules[4]");
+/// # let _ = kinematics;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SwerveDriveKinematics<const N: usize> {
+    /// Each module's position relative to the robot's center, in the
+    /// order the robot code gives them.
+    pub modules: [Translation2d; N],
+}
+
+impl<const N: usize> Default for SwerveDriveKinematics<N> {
+    fn default() -> Self {
+        Self {
+            modules: [Translation2d::default(); N],
+        }
+    }
+}
+
+// By hand: the derive doesn't take generic types.
+impl<const N: usize> NtStruct for SwerveDriveKinematics<N> {
+    const SIZE: usize = <[Translation2d; N] as StructField>::SIZE;
+    fn type_name() -> Cow<'static, str> {
+        format!("SwerveDriveKinematics__{N}").into()
+    }
+    fn schema() -> Cow<'static, str> {
+        format!("Translation2d modules[{N}]").into()
+    }
+    fn pack(&self, out: &mut Vec<u8>) {
+        StructField::pack(&self.modules, out);
+    }
+    fn unpack(data: &[u8]) -> Self {
+        Self {
+            modules: StructReader::new(data).read(),
+        }
+    }
+    fn for_each_nested(f: &mut dyn FnMut(&str, &str)) {
+        Translation2d::for_each_struct_schema(f);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Written by Claude.
@@ -192,76 +251,34 @@ mod tests {
     }
 
     #[test]
-    fn schemas_match_wpimath() {
-        // GetSchema() in wpimath's *Struct.hpp at the pinned allwpilib
-        // commit, copied by hand. (The derive builds ours from the fields.)
-        let cases = [
-            (
-                "Translation2d",
-                Translation2d::schema(),
-                "double x;double y",
-            ),
-            ("Rotation2d", Rotation2d::schema(), "double value"),
-            (
-                "Pose2d",
-                Pose2d::schema(),
-                "Translation2d translation;Rotation2d rotation",
-            ),
-            (
-                "Transform2d",
-                Transform2d::schema(),
-                "Translation2d translation;Rotation2d rotation",
-            ),
-            (
-                "Twist2d",
-                Twist2d::schema(),
-                "double dx;double dy;double dtheta",
-            ),
-            (
-                "Translation3d",
-                Translation3d::schema(),
-                "double x;double y;double z",
-            ),
-            (
-                "Quaternion",
-                Quaternion::schema(),
-                "double w;double x;double y;double z",
-            ),
-            ("Rotation3d", Rotation3d::schema(), "Quaternion q"),
-            (
-                "Pose3d",
-                Pose3d::schema(),
-                "Translation3d translation;Rotation3d rotation",
-            ),
-            (
-                "Transform3d",
-                Transform3d::schema(),
-                "Translation3d translation;Rotation3d rotation",
-            ),
-            (
-                "Twist3d",
-                Twist3d::schema(),
-                "double dx;double dy;double dz;double rx;double ry;double rz",
-            ),
-            (
-                "ChassisVelocities",
-                ChassisVelocities::schema(),
-                "double vx;double vy;double omega",
-            ),
-            (
-                "SwerveModulePosition",
-                SwerveModulePosition::schema(),
-                "double distance;Rotation2d angle",
-            ),
-            (
-                "SwerveModuleVelocity",
-                SwerveModuleVelocity::schema(),
-                "double velocity;Rotation2d angle",
-            ),
-        ];
-        for (name, ours, wpimath) in cases {
-            assert_eq!(ours, wpimath, "{name}");
-        }
+    fn swerve_drive_kinematics() {
+        check::<SwerveDriveKinematics<4>>().unwrap();
+        check::<SwerveDriveKinematics<3>>().unwrap();
+        assert_eq!(<SwerveDriveKinematics<4> as NtStruct>::SIZE, 64);
+        assert_eq!(
+            SwerveDriveKinematics::<3>::type_name(),
+            "SwerveDriveKinematics__3"
+        );
+        let mut seen = Vec::new();
+        SwerveDriveKinematics::<4>::for_each_struct_schema(&mut |ty, _| seen.push(ty.to_owned()));
+        assert_eq!(
+            seen,
+            ["struct:Translation2d", "struct:SwerveDriveKinematics__4"]
+        );
+        let k = SwerveDriveKinematics {
+            modules: [
+                Translation2d { x: 1.0, y: 2.0 },
+                Translation2d { x: 3.0, y: 4.0 },
+            ],
+        };
+        let mut out = Vec::new();
+        NtStruct::pack(&k, &mut out);
+        let expected: Vec<u8> = [1.0f64, 2.0, 3.0, 4.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        assert_eq!(out, expected);
+        assert_eq!(<SwerveDriveKinematics<2> as NtStruct>::unpack(&out), k);
     }
 
     #[test]

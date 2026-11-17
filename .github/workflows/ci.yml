@@ -240,20 +240,34 @@ jobs:
             gh pr comment "$PR" --body-file coverage.md
           fi
 
-  # Every tracked ntcore test case is ported or listed as not applicable.
+  # Every tracked ntcore test case is ported or listed as not applicable,
+  # and nt4-wpimath's struct schemas match WPILib's (scripts/schema_audit.py).
   upstream-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch ntcore tests at the pinned commit
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # RobotPy, the same version as the interop tests' pyntcore, for the
+      # schema audit's third comparison (compiled WPILib, not a parse).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --pre robotpy-wpimath==2027.0.0a8 robotpy-hal==2027.0.0a8
+      - name: Fetch ntcore tests and WPILib's struct types at the pinned commit
         run: |
           git init -q allwpilib
           cd allwpilib
           git remote add origin https://github.com/wpilibsuite/allwpilib.git
-          git sparse-checkout set --no-cone /ntcore/src/test/ /wpiutil/src/test/native/cpp/struct/
+          git sparse-checkout set --no-cone /ntcore/src/test/ /wpiutil/src/test/native/cpp/struct/ \
+            '/wpimath/src/main/native/include/wpi/math/*/struct/' \
+            '/wpimath/src/main/java/org/wpilib/math/*/struct/' \
+            /hal/src/main/native/include/wpi/hal/DriverStationTypes.hpp \
+            /hal/src/main/java/org/wpilib/hardware/hal/struct/
           git fetch -q --depth 1 --filter=blob:none origin "$ALLWPILIB_COMMIT"
           git checkout -q FETCH_HEAD
-      - run: python3 scripts/upstream_audit.py allwpilib
+      - run: python scripts/upstream_audit.py allwpilib
+      - run: python scripts/schema_audit.py allwpilib --robotpy "$(python -c 'import sys; print(sys.executable)')"
       - name: Compare with allwpilib main (informational)
         continue-on-error: true
         run: |
@@ -261,4 +275,7 @@ jobs:
           git fetch -q --depth 1 --filter=blob:none origin main
           git checkout -q FETCH_HEAD
           cd ..
-          python3 scripts/upstream_audit.py allwpilib || echo "::warning::ntcore main has test changes not ported yet"
+          status=0
+          python scripts/upstream_audit.py allwpilib || { echo "::warning::ntcore main has test changes not ported yet"; status=1; }
+          python scripts/schema_audit.py allwpilib || { echo "::warning::WPILib main has struct changes nt4-wpimath doesn't match"; status=1; }
+          exit $status

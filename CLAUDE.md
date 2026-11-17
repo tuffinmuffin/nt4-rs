@@ -44,7 +44,9 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   `nt4/tests/derive.rs`, plus the error cases in `nt4-derive`'s own unit
   tests.
 - `crates/nt4-wpimath`: the WPILib types, built only on `nt4`'s public
-  traits. Their schemas must match wpimath's `*Struct.hpp` exactly. nt4's
+  traits. Their schemas must match wpimath's `*Struct.hpp` exactly;
+  `scripts/schema_audit.py` checks that, and every new type goes in
+  `examples/audit_schemas.rs` (and off `scripts/schema_audit.txt`). nt4's
   own tests use the copies in `nt4/tests/support/wpi_types.rs` instead
   (nt4 can't depend on nt4-wpimath).
 
@@ -76,6 +78,7 @@ cargo test --workspace --all-features
 cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 python3 scripts/upstream_audit.py <allwpilib checkout>
+python3 scripts/schema_audit.py <allwpilib checkout> [--robotpy <python with robotpy-wpimath, robotpy-hal>]   # nt4-wpimath against WPILib's schemas
 NT4_INTEROP_PYTHON=<python with pyntcore> cargo test -p nt4 --all-features --test interop --test interop_server
 # coverage, as the CI `coverage` job measures it (needs cargo-llvm-cov)
 cargo llvm-cov -p nt4-proto -p nt4-core -p nt4-derive -p nt4 -p nt4-wpimath --all-features --ignore-filename-regex '(tests|examples|benches)/' --html

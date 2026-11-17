@@ -406,6 +406,7 @@ name = "nt4-wpimath"
 version = "0.2.0"
 dependencies = [
  "nt4",
+ "serde_json",
  "tokio",
 ]
 

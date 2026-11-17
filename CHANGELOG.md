@@ -19,9 +19,12 @@ in README.md.
   `int16 raw[4]`, `Rotation2d angle`), and `for_each_field_schema` the
   schemas of the struct in a field. Using a type that isn't a
   `StructField` as a field now says so in the compiler error.
+- `nt4-wpimath`: `SwerveDriveKinematics<N>` (`struct:SwerveDriveKinematics__N`,
+  the module positions), generic over the number of modules.
 - `nt4-wpimath`'s types use the derive; their schemas, sizes and nested
-  schema order are unchanged (a test checks them against wpimath's
-  `*Struct.hpp`).
+  schema order are unchanged. `scripts/schema_audit.py`, run in CI, checks
+  them against WPILib's own struct definitions at the pinned allwpilib
+  commit.
 
 ## 0.1.0 (2026-11-16)
 
