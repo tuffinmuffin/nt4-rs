@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/nt4-proto", "crates/nt4-core", "crates/nt4-derive", "crates/nt4", "crates/nt4-wpimath", "crates/nt4-photon", "crates/nt4-bench", "crates/nt4-fuzz", "crates/nt4-perf"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/tuffinmuffin/nt4-rs"

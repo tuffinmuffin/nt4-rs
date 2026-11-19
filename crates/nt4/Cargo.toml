@@ -21,9 +21,9 @@ server = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
 derive = ["dep:nt4-derive"]
 
 [dependencies]
-nt4-proto = { path = "../nt4-proto", version = "0.2.0" }
-nt4-core = { path = "../nt4-core", version = "0.2.0" }
-nt4-derive = { path = "../nt4-derive", version = "0.2.0", optional = true }
+nt4-proto = { path = "../nt4-proto", version = "0.3.0" }
+nt4-core = { path = "../nt4-core", version = "0.3.0" }
+nt4-derive = { path = "../nt4-derive", version = "0.3.0", optional = true }
 tokio = { version = "1.47", features = ["rt", "net", "time", "sync", "macros", "io-util"], optional = true }
 tokio-tungstenite = { version = "0.30", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"], optional = true }

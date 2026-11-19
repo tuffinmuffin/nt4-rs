@@ -9,6 +9,12 @@ name: Upstream watch
 # Only releases from 2027 on count (nt4 doesn't track ntcore 2026), and only
 # one newer than the pin: an older release lacks cases we ported from the
 # pin, which isn't news.
+#
+# A second job, `interop-latest`, runs the interop suites (interop,
+# interop_server, conformance) against the newest 2027 pyntcore, not the
+# version ci.yml pins, on Linux, Windows and macOS. It runs every week even
+# when that is the pinned version, so a runner or Python change shows up
+# too. A failure opens (or adds to) one issue labelled `interop-watch`.
 
 on:
   schedule:
@@ -17,6 +23,9 @@ on:
     inputs:
       ref:
         description: "allwpilib tag or commit to audit (default: the newest 2027+ release, if newer than the pin)"
+        required: false
+      pyntcore:
+        description: "pyntcore version for interop-latest (default: the newest 2027 release)"
         required: false
 
 permissions:
@@ -141,3 +150,98 @@ jobs:
           fi
           echo "::error::allwpilib $REF differs from what nt4 follows; see the upstream-watch issue."
           exit 1
+
+  interop-latest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pyntcore
+        shell: bash
+        env:
+          WANT: ${{ inputs.pyntcore }}
+        run: |
+          if [ -n "$WANT" ]; then
+            python -m pip install --pre "pyntcore==$WANT"
+          else
+            python -m pip install --pre --upgrade "pyntcore>=2027,<2028"
+          fi
+          python -c "import ntcore; print('pyntcore', ntcore.__version__)"
+      - name: Interop tests
+        shell: bash
+        run: |
+          NT4_INTEROP_PYTHON="$(python -c 'import sys; print(sys.executable)')"
+          export NT4_INTEROP_PYTHON
+          version=$(python -c 'import ntcore; print(ntcore.__version__)')
+          pinned=$(sed -n 's/.*pyntcore==\([^ ]*\).*/\1/p' .github/workflows/ci.yml | head -n 1)
+          status=0
+          # --no-fail-fast: one failing suite mustn't hide the others' results.
+          cargo test -p nt4 --all-features --no-fail-fast \
+            --test interop --test interop_server --test conformance \
+            -- --test-threads=1 > test.log 2>&1 || status=$?
+          {
+            echo "### ${{ matrix.os }}: pyntcore $version (ci.yml pins $pinned)"
+            echo
+            if [ "$status" = 0 ]; then
+              echo "All interop tests passed."
+            else
+              echo "Failed:"
+              echo
+              echo '```'
+              # The failing tests and what each said (the line after "panicked
+              # at" is the message), without the build noise.
+              grep -E -A1 "panicked at" test.log | grep -v -E "^--$|^note:" > why.txt || true
+              grep -E "^test .* FAILED|^test result|^  step" test.log > failed.txt || true
+              cat failed.txt why.txt | head -n 150
+              echo '```'
+            fi
+          } > report-${{ matrix.os }}.md
+          cat report-${{ matrix.os }}.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: interop-report-${{ matrix.os }}
+          path: report-${{ matrix.os }}.md
+
+  interop-issue:
+    needs: interop-latest
+    if: failure()
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: interop-report-*
+          merge-multiple: true
+      - name: Open or update the interop-watch issue
+        run: |
+          gh label create interop-watch --repo "$GITHUB_REPOSITORY" --color f9d0c4 \
+            --description "nt4 against the newest pyntcore failed" 2>/dev/null || true
+          version=$(sed -n 's/.*pyntcore \([^ ]*\) (ci.yml.*/\1/p' report-*.md | head -n 1)
+          {
+            echo "The weekly interop run against the newest pyntcore failed. If the new"
+            echo "ntcore behaves differently, follow it (a conformance scenario shows what it"
+            echo "does) and then bump the pyntcore pin in ci.yml."
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            cat report-*.md
+          } > issue.md
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label interop-watch \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --title "Interop watch: pyntcore $version"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label interop-watch \
+              --title "Interop watch: pyntcore $version" --body-file issue.md
+          fi

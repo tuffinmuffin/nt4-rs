@@ -23,7 +23,7 @@ Unofficial: not affiliated with or endorsed by WPILib or FIRST.
 
 ```toml
 [dependencies]
-nt4 = "0.2"
+nt4 = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 ```
 
@@ -53,7 +53,7 @@ For the simulator or a local server, use
 ## Server
 
 ```toml
-nt4 = { version = "0.2", features = ["server"] }
+nt4 = { version = "0.3", features = ["server"] }
 ```
 
 ```rust,ignore
@@ -92,8 +92,8 @@ Publishing one also publishes its schema under
 
 ```toml
 [dependencies]
-nt4 = "0.2"
-nt4-wpimath = "0.2"
+nt4 = "0.3"
+nt4-wpimath = "0.3"
 ```
 
 ```rust,ignore
