@@ -110,9 +110,10 @@ CI. A release is one button and one merge:
    `## <version> (<date>)` and updates the READMEs' install lines, then
    opens a PR "Release <version>". It refuses a version that isn't newer,
    or an empty or missing Unreleased section.
-3. Merge the PR. When CI passes on `main`, `release.yml` sees a version
-   with no tag yet: it checks the changelog and a `cargo publish --dry-run`,
-   tags the commit `v<version>`, publishes `nt4-proto`, `nt4-core`,
+3. Merge the PR. The merge's push to `main` starts `release.yml`, which
+   sees a version with no tag yet: it waits for CI to pass on that commit,
+   checks the changelog and a `cargo publish --dry-run`, tags the commit
+   `v<version>`, publishes `nt4-proto`, `nt4-core`,
    `nt4-derive`, `nt4` and `nt4-wpimath` in that order (with a short-lived
    token from crates.io trusted publishing: each crate trusts this
    repository's `release.yml` in the `Deploy` environment), and creates the
@@ -129,8 +130,13 @@ then `cargo update --workspace`) if you'd rather make the release PR
 yourself; merging it releases the same way. Pushing a tag `v<version>` on a
 commit on `main` still works too.
 
-If publishing fails partway, re-run the workflow: crates already on
-crates.io at that version are skipped. A published version can't be
+If publishing fails partway, run it again with **Actions > Release > Run
+workflow**: it releases the version on `main`, from the commit its tag
+points at if the tag was already made, and skips crates already on
+crates.io at that version. (crates.io's trusted publishing only accepts
+runs started by a push or by Run workflow, so `release.yml` is started by
+the merge's push and waits for CI, rather than being started by CI
+finishing.) A published version can't be
 changed or reused (only yanked), so fix forward with the next patch
 version. CI runs `cargo publish --dry-run` on every push, so packaging
 problems show up before a release.

@@ -23,7 +23,7 @@ permissions:
   pull-requests: write # to open the release PR
 
 concurrency:
-  group: release
+  group: prepare-release
   cancel-in-progress: false
 
 jobs:
@@ -61,7 +61,7 @@ jobs:
           git push --force origin "$branch"
           body="Sets the version to $VERSION and dates its CHANGELOG.md section.
 
-          **Merging this releases $VERSION**: when CI passes on main, release.yml tags the merge commit \`v$VERSION\`, publishes the crates to crates.io and creates the GitHub release.
+          **Merging this releases $VERSION**: the merge's push starts release.yml, which waits for CI to pass on main, then tags the merge commit \`v$VERSION\`, publishes the crates to crates.io and creates the GitHub release.
 
           Made by the Prepare release workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. GitHub doesn't run CI on PRs opened by a workflow, so this PR has no checks; CI on main gates the release."
           if url=$(gh pr create --base main --head "$branch" --title "Release $VERSION" --body "$body" 2>&1); then

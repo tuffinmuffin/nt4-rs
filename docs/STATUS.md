@@ -466,10 +466,14 @@ check is enough.
       (`interop-latest`), opening an `interop-watch` issue on failure.
       Releasing is now a button (Actions > Prepare release, which runs
       `scripts/prepare_release.py` and opens a "Release <version>" PR) and
-      a merge (`release.yml` tags and publishes once CI passes on main).
-      0.3.0 was published by that second half: main was already at an
-      untagged 0.3.0 when the workflow landed, so CI passing after that
-      merge released it. The button's first real run is the next release.
+      a merge (the merge's push starts `release.yml`, which waits for CI,
+      tags and publishes; Run workflow on Release retries one that stopped).
+      The first version started release.yml when CI finished
+      (`workflow_run`): on 0.3.0 it tagged `v0.3.0`, then crates.io refused
+      the token, as its trusted publishing doesn't accept `workflow_run`
+      runs. Now it's started by push (and workflow_dispatch for retries);
+      0.3.0 is published by a retry, from the tagged commit. The Prepare
+      release button's first real run is the next release.
 4. **`nt4-photon`, before publishing it** (it is `publish = false` and
    out of `release.yml`'s `CRATES`; nt4 and the other crates don't need
    it):
