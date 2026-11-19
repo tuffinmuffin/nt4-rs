@@ -32,6 +32,20 @@ client's own values back.
 - On disconnect, or when a topic is unannounced, a `Subscriber` to a topic
   this client doesn't publish goes back to no value, as ntcore resets
   topics that no longer exist. Topics we publish keep theirs.
+- The server's own `Subscriber` goes back to no value when a topic is
+  deleted (its last publisher gone), as on a client.
+- The server's clock no longer starts again at 0 when a `Server` starts: it
+  starts from the wall-clock time (microseconds since the Unix epoch) and
+  runs on the monotonic clock from there, so a restarted server carries on
+  from where the last one stopped, as ntcore's does. Before, an ntcore
+  client that reconnected to a restarted nt4 server resent its last values
+  stamped with the old server's time, and every later value it sent looked
+  older and was ignored: a dashboard couldn't change what it had written
+  before the restart. `Server::now_us` values are large numbers now.
+- New side-by-side conformance tests (`nt4/tests/conformance.rs`): each
+  scenario runs on an ntcore server and ours, each with an ntcore client
+  and ours, and everything must see what the all-ntcore run sees. They
+  found the problems above; CI's interop job runs them.
 - New `ClientCore::value` and `ClientCore::publishes`.
 
 ## 0.2.0 (2026-11-16)

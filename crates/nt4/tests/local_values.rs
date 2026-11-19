@@ -144,3 +144,35 @@ async fn events_include_our_own_writes() {
     .unwrap_or(false);
     assert!(heard, "no event for our own write");
 }
+
+// When a topic is deleted (its last publisher gone), the server's own
+// subscriber goes back to no value, as ntcore's does.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_servers_subscriber_forgets_a_deleted_topic() {
+    let server = server().await;
+    let sub = server.subscribe::<f64>("/dash/level", Default::default());
+    let client = Client::start(ClientConfig::server(
+        "dash",
+        "127.0.0.1",
+        server.local_addr().port(),
+    ));
+    let publisher = client.publish::<f64>("/dash/level", Default::default());
+    publisher.set(4.0);
+    eventually("the server gets 4.0", || sub.get() == Some(4.0)).await;
+    drop(publisher);
+    eventually("the server forgets it", || sub.get().is_none()).await;
+}
+
+// A server started after another one stopped has a later clock, as
+// ntcore's does when robot code restarts: ntcore clients resend their last
+// values stamped with the old server's time, so a clock that went back to
+// 0 would make their later values look older and be ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restarted_servers_clock_carries_on() {
+    let first = server().await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let last = first.now_us();
+    drop(first);
+    let second = server().await;
+    assert!(second.now_us() > last, "{} <= {last}", second.now_us());
+}

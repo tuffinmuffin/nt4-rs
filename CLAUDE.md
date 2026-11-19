@@ -29,6 +29,11 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   `Subscriber<T>` via `NtValue`. Interop tests in `tests/interop.rs` drive a
   real ntcore through `tests/interop/ntcore_peer.py` (JSON lines on stdin);
   they skip unless `NT4_INTEROP_PYTHON` points at a Python with pyntcore.
+  `tests/conformance.rs` runs scenarios (steps such as "the robot sets a
+  value", "the server restarts", "check") on {ntcore, our} server x {ntcore,
+  our} client, with ntcore's view as the answer: add a scenario there for
+  any behavior that should match ntcore, rather than writing the expected
+  values by hand.
 - `nt4`'s `server` feature: `Server` (listen, handshake, one task per
   connection around a shared `ServerCore`, persistent file). The handle
   types (`Publisher<T>`, `Subscriber<T>`, `Events`) live in `handles.rs` and

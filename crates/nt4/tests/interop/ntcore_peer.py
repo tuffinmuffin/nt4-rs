@@ -20,6 +20,8 @@ Commands (the peer is an ntcore server or an ntcore client):
   {"cmd": "add_schema", "name": "struct:Point", "type": "structschema", "schema": "double x"}
   {"cmd": "subscribe", "name": "/x"}
   {"cmd": "get", "name": "/x", "timeout": 5, "not": <value to wait past>}
+  {"cmd": "peek", "name": "/x"}          (the value now, or null; subscribes)
+  {"cmd": "set_default", "name": "/x", "type": "double", "value": 1.5}
   {"cmd": "connections"}
   {"cmd": "now"}
 
@@ -118,6 +120,16 @@ def handle(cmd):
         return {"ok": True}
     if c == "add_schema":
         inst.add_schema(cmd["name"], cmd["type"], cmd["schema"])
+        return {"ok": True}
+    if c == "peek":
+        v = subscriber(cmd["name"]).get()
+        return {"ok": True, "value": to_json(v.value()) if v.is_valid() else None}
+    if c == "set_default":
+        name, ty = cmd["name"], cmd["type"]
+        if name not in publishers:
+            publishers[name] = inst.get_topic(name).generic_publish(ty)
+        setter = SETTERS[ty].replace("set_", "set_default_", 1)
+        getattr(publishers[name], setter)(cmd["value"])
         return {"ok": True}
     if c == "subscribe":
         subscriber(cmd["name"])
