@@ -209,6 +209,8 @@ pub fn publishing_client() -> (ClientCore, Vec<(PubId, Value)>) {
             PublishOptions {
                 periodic: Some(0.02),
                 send_all: true,
+                // Every value goes out, as in the benchmark.
+                keep_duplicates: true,
             },
         );
         if (40..190).contains(&i) {

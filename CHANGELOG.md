@@ -4,6 +4,50 @@ The library crates (`nt4-proto`, `nt4-core`, `nt4-derive`, `nt4`,
 `nt4-wpimath`) share one version number. Pushing the tag `v<version>` publishes them; see "Releasing"
 in README.md.
 
+## Unreleased (0.3.0)
+
+Local values now follow ntcore's local storage, so a program sees the values
+it writes. Found while building a dashboard: a toggle kept showing its old
+state after it was clicked, because the server (rightly) doesn't send a
+client's own values back.
+
+- A value set through a publisher is the topic's value for that client at
+  once: `Client::topic`, `Subscriber::get` and `ClientCore::value` show it,
+  with or without a server, and across a reconnect. The same goes for the
+  server's own publishers and subscribers. (Before, only values from the
+  network were seen.)
+- `Event::Value` and `ServerEvent::Value` have a new field, `local`: true for
+  a value set by this client (or the server itself). Listeners now hear
+  those writes too, as ntcore's value listeners do. **Breaking** for code
+  that matches these variants without `..`.
+- A value older than the topic's current one no longer replaces it (one
+  that was on its way when we wrote ours, say); anything replaces a default
+  (time 0), and a default only fills a topic with no value. The server still
+  forwards older values to clients, as ntcore's does.
+- Setting the value a topic already has sends nothing, as in ntcore. The
+  new `PublishOptions::keep_duplicates` sends it anyway. **Breaking** for
+  code that builds `PublishOptions` without `..Default::default()`.
+- When the server answers our publish of a topic it already has, the topic
+  keeps its value (it was cleared).
+- On disconnect, or when a topic is unannounced, a `Subscriber` to a topic
+  this client doesn't publish goes back to no value, as ntcore resets
+  topics that no longer exist. Topics we publish keep theirs.
+- The server's own `Subscriber` goes back to no value when a topic is
+  deleted (its last publisher gone), as on a client.
+- The server's clock no longer starts again at 0 when a `Server` starts: it
+  starts from the wall-clock time (microseconds since the Unix epoch) and
+  runs on the monotonic clock from there, so a restarted server carries on
+  from where the last one stopped, as ntcore's does. Before, an ntcore
+  client that reconnected to a restarted nt4 server resent its last values
+  stamped with the old server's time, and every later value it sent looked
+  older and was ignored: a dashboard couldn't change what it had written
+  before the restart. `Server::now_us` values are large numbers now.
+- New side-by-side conformance tests (`nt4/tests/conformance.rs`): each
+  scenario runs on an ntcore server and ours, each with an ntcore client
+  and ours, and everything must see what the all-ntcore run sees. They
+  found the problems above; CI's interop job runs them.
+- New `ClientCore::value` and `ClientCore::publishes`.
+
 ## 0.2.0 (2026-11-16)
 
 - `#[derive(NtStruct)]`, in the new `nt4-derive` crate: turn on `nt4`'s

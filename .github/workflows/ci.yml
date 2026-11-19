@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           export NT4_INTEROP_PYTHON="$(python -c 'import sys; print(sys.executable)')"
-          cargo test -p nt4 --all-features --test interop --test interop_server -- --test-threads=1
+          cargo test -p nt4 --all-features --test interop --test interop_server --test conformance -- --test-threads=1
 
   # Differential fuzzer: nt4-proto's decoders against ntcore's own, from the
   # pyntcore wheel (the oracle builds on Linux only). A short bounded run as

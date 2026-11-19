@@ -129,9 +129,33 @@ struct State {
     schemas: HashSet<String>,
 }
 
+/// Where a new server's clock starts: the wall-clock time, in microseconds
+/// since the Unix epoch. From there it runs on the monotonic clock.
+///
+/// ntcore's server clock (`wpi::Now`: `steady_clock` on a desktop, the FPGA
+/// clock on a roboRIO) keeps running when robot code restarts, and ntcore
+/// clients rely on that: after reconnecting they resend their last values
+/// stamped with the old server's time offset. A clock that started again at
+/// 0 would make every later value from those clients look older than the
+/// resent one, so their writes would be ignored. Starting from the wall
+/// clock gives the same: a restarted server's clock carries on from where
+/// the last one stopped (unless the computer's clock is set back).
+fn clock_base_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+}
+
+/// Microseconds since `start`, plus 1 so the clock is never 0.
+fn elapsed_us(start: Instant) -> i64 {
+    i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX) + 1
+}
+
 struct Shared {
     state: Mutex<State>,
     start: Instant,
+    /// The server clock at `start`, in microseconds: see [`clock_base_us`].
+    base_us: i64,
     /// Problems loading the persistent file at start.
     load_errors: Vec<String>,
 }
@@ -146,7 +170,7 @@ impl Shared {
     /// The server clock in microseconds, never 0 (0 means "default"). This
     /// is the server time clients sync to.
     fn now_us(&self) -> i64 {
-        i64::try_from(self.start.elapsed().as_micros()).unwrap_or(i64::MAX) + 1
+        elapsed_us(self.start).saturating_add(self.base_us)
     }
 }
 
@@ -155,10 +179,20 @@ impl State {
     /// every connection that has frames to send.
     fn settle(&mut self) {
         while let Some(event) = self.core.poll_event() {
-            if let ServerEvent::Value { name, value, .. } = &event {
-                if let Some(w) = self.watchers.get(&**name) {
-                    w.send_replace(Some(value.clone()));
+            match &event {
+                ServerEvent::Value { name, value, .. } => {
+                    if let Some(w) = self.watchers.get(&**name) {
+                        w.send_replace(Some(value.clone()));
+                    }
                 }
+                // A deleted topic (nobody publishes it, not retained or
+                // persistent) has no value, as in ntcore.
+                ServerEvent::Unannounced { name, .. } => {
+                    if let Some(w) = self.watchers.get(&**name) {
+                        w.send_replace(None);
+                    }
+                }
+                _ => {}
             }
             // Drop listeners whose `Events` was dropped.
             self.listeners.retain(|l| l.send(event.clone()).is_ok());
@@ -253,6 +287,7 @@ impl Server {
         let listener = TcpListener::bind((config.listen_address, config.port)).await?;
         let local_addr = listener.local_addr()?;
         let start = Instant::now();
+        let base_us = clock_base_us();
         let mut core = ServerCore::new();
         let mut load_errors = Vec::new();
         if let Some(path) = config.persist_file.clone() {
@@ -260,7 +295,7 @@ impl Server {
                 .await
                 .unwrap_or_default();
             load_errors = notes;
-            let now = i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX) + 1;
+            let now = elapsed_us(start).saturating_add(base_us);
             load_errors.extend(core.load_persistent(&data, now));
         }
         let shared = Arc::new(Shared {
@@ -272,6 +307,7 @@ impl Server {
                 schemas: HashSet::new(),
             }),
             start,
+            base_us,
             load_errors,
         });
         let (stop_tx, stop_rx) = watch::channel(false);

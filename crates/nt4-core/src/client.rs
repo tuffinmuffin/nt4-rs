@@ -26,6 +26,8 @@
 //! let pose = client.publish("/robot/x", NtType::Double, Properties::new(), PublishOptions::default());
 //! client.set_value(pose, Value::Double(1.5), 0).unwrap();
 //! client.subscribe(vec!["/robot/".into()], SubscriptionOptions { prefix: true, ..Default::default() });
+//! // Our own value is the topic's value at once, server or not.
+//! assert!(matches!(client.poll_event(), Some(Event::Value { local: true, .. })));
 //!
 //! client.connect(1_000, ProtocolVersion::V4_1);
 //! // The first frame is the RTT ping that starts time sync.
@@ -122,6 +124,9 @@ pub struct PublishOptions {
     pub periodic: Option<f64>,
     /// Send every value set, not only the newest one each period.
     pub send_all: bool,
+    /// Send a value even when it equals the topic's current value. Off by
+    /// default: like ntcore, setting the same value again sends nothing.
+    pub keep_duplicates: bool,
 }
 
 impl PublishOptions {
@@ -228,14 +233,18 @@ pub enum Event {
         /// True when this answers our own `set_properties`.
         ack: bool,
     },
-    /// A value arrived.
+    /// A topic got a new value: one that arrived from the server, or one
+    /// this client set (`local`), as ntcore's value listeners hear both.
     Value {
         /// Topic name.
         name: Arc<str>,
-        /// Topic id.
+        /// Topic id, or -1 for a local value on a topic the server hasn't
+        /// announced (yet).
         id: i32,
         /// The value and its timestamps.
         value: TopicValue,
+        /// True when this client set it with [`ClientCore::set_value`].
+        local: bool,
     },
     /// The server time offset changed.
     TimeSync(TimeSyncUpdate),
@@ -298,8 +307,10 @@ struct Connection {
 pub struct ClientCore {
     publishers: BTreeMap<i32, Publisher>,
     subscriptions: BTreeMap<i32, Subscription>,
-    /// Newest value per published topic name, as (local time, value), for
-    /// replay after a reconnect.
+    /// Newest value per published topic name, as (local time, value): the
+    /// topic's value while it isn't announced, and replayed after a
+    /// reconnect. Like ntcore, a topic this client publishes exists (with
+    /// its value) with or without a server.
     last_values: HashMap<String, (i64, Value)>,
     next_pubuid: i32,
     next_subuid: i32,
@@ -401,6 +412,13 @@ impl ClientCore {
     /// or 0 to set it as a default that any other value overrides.
     ///
     /// While disconnected the value is kept and sent after the next connect.
+    ///
+    /// As in ntcore's local storage, the value then becomes the topic's
+    /// value for this client ([`value`](Self::value), and an
+    /// [`Event::Value`] with `local` set), unless it's older than the value
+    /// the topic has. A default (time 0) only fills a topic with no value.
+    /// Setting the value the topic already has does nothing, unless the
+    /// publisher has [`PublishOptions::keep_duplicates`].
     pub fn set_value(&mut self, id: PubId, value: Value, time_us: i64) -> Result<(), ClientError> {
         let publisher = self
             .publishers
@@ -417,19 +435,84 @@ impl ClientCore {
         } else {
             SendMode::Normal
         };
+        let keep_duplicates = publisher.options.keep_duplicates;
+        let name = publisher.name.clone();
+        let current = self.value(&name);
+        // SetDefaultEntryValue: a default only fills an empty topic.
+        if time_us == 0 && current.is_some() {
+            return Ok(());
+        }
+        // PublishLocalValue: the same value again isn't sent or stored.
+        if !keep_duplicates && current.as_ref().is_some_and(|c| c.value == value) {
+            return Ok(());
+        }
         if let Some(conn) = &mut self.conn {
             conn.outgoing
                 .send_value(&mut self.wire, id.0, time_us, &value, mode);
         }
-        // Look up before inserting, so the name is only copied the first time.
-        match self.last_values.get_mut(&publisher.name) {
-            Some(last) => *last = (time_us, value),
-            None => {
-                self.last_values
-                    .insert(publisher.name.clone(), (time_us, value));
+        // SetValue: sent either way, but an older value than the topic's
+        // isn't kept (anything replaces a default).
+        if current.is_some_and(|c| c.local_time_us != 0 && time_us < c.local_time_us) {
+            return Ok(());
+        }
+        let offset = self
+            .conn
+            .as_ref()
+            .and_then(|c| c.time_sync.offset())
+            .unwrap_or(0);
+        let topic_value = TopicValue {
+            server_time_us: if time_us == 0 { 0 } else { time_us + offset },
+            local_time_us: time_us,
+            value: value.clone(),
+        };
+        let mut topic_id = -1;
+        if let Some(conn) = &mut self.conn {
+            if let Some(&tid) = conn.topic_ids.get(name.as_str()) {
+                if let Some(topic) = conn.topics.get_mut(&tid) {
+                    topic.value = Some(topic_value.clone());
+                    topic_id = tid;
+                }
             }
         }
+        self.events.push_back(Event::Value {
+            name: name.as_str().into(),
+            id: topic_id,
+            value: topic_value,
+            local: true,
+        });
+        self.last_values.insert(name, (time_us, value));
         Ok(())
+    }
+
+    /// A topic's value for this client, as ntcore keeps it: the last value
+    /// set here or received from the server that wasn't older than the one
+    /// before. A topic this client publishes has its value even while
+    /// disconnected (then its server time is the local time, as the offset
+    /// isn't known).
+    ///
+    /// ```
+    /// use nt4_core::{ClientCore, PublishOptions};
+    /// use nt4_proto::{NtType, Properties, Value};
+    /// let mut client = ClientCore::new();
+    /// let p = client.publish("/x", NtType::Double, Properties::new(), PublishOptions::default());
+    /// client.set_value(p, Value::Double(1.5), 10).unwrap();
+    /// assert_eq!(client.value("/x").map(|v| v.value), Some(Value::Double(1.5)));
+    /// ```
+    pub fn value(&self, name: &str) -> Option<TopicValue> {
+        if let Some(v) = self.topic_by_name(name).and_then(|t| t.value.clone()) {
+            return Some(v);
+        }
+        let (time_us, value) = self.last_values.get(name)?;
+        Some(TopicValue {
+            value: value.clone(),
+            local_time_us: *time_us,
+            server_time_us: if *time_us == 0 { 0 } else { *time_us },
+        })
+    }
+
+    /// Whether this client publishes `name` (with any of its publishers).
+    pub fn publishes(&self, name: &str) -> bool {
+        self.publishers.values().any(|p| p.name == name)
     }
 
     /// Change a topic's properties on the server. A `null` value deletes
@@ -657,6 +740,24 @@ impl ClientCore {
                 if let Some(old) = replaced.filter(|&old| old != id) {
                     conn.topics.remove(&old);
                 }
+                // The value stays: the same id announced again (the server
+                // answering our publish of a topic it already had) keeps
+                // the topic's value, and a topic we publish starts from
+                // ours, which the server won't send back.
+                let offset = conn.time_sync.offset().unwrap_or(0);
+                let value = conn
+                    .topics
+                    .get(&id)
+                    .and_then(|t| t.value.clone())
+                    .or_else(|| {
+                        self.last_values
+                            .get(&*name)
+                            .map(|(time_us, value)| TopicValue {
+                                value: value.clone(),
+                                local_time_us: *time_us,
+                                server_time_us: if *time_us == 0 { 0 } else { time_us + offset },
+                            })
+                    });
                 conn.topics.insert(
                     id,
                     Topic {
@@ -664,7 +765,7 @@ impl ClientCore {
                         id,
                         ty: ty.clone(),
                         properties: properties.clone(),
-                        value: None,
+                        value,
                     },
                 );
                 let publisher = pubuid
@@ -768,10 +869,25 @@ impl ClientCore {
         };
         let offset = conn.time_sync.offset().unwrap_or(0);
         let value = TopicValue {
-            local_time_us: msg.timestamp_us.saturating_sub(offset),
+            // A default (time 0) stays 0 in both clocks.
+            local_time_us: if msg.timestamp_us == 0 {
+                0
+            } else {
+                msg.timestamp_us.saturating_sub(offset)
+            },
             server_time_us: msg.timestamp_us,
             value: msg.value,
         };
+        // Like ntcore's SetValue, a value older than the topic's isn't
+        // kept (one that was on its way when we set ours), and anything
+        // replaces a default.
+        if topic
+            .value
+            .as_ref()
+            .is_some_and(|v| v.local_time_us != 0 && value.local_time_us < v.local_time_us)
+        {
+            return;
+        }
         topic.value = Some(value.clone());
         let name = topic.name.clone();
         // Like ntcore, the newest value of a topic we publish is replayed on
@@ -786,6 +902,7 @@ impl ClientCore {
             name,
             id: msg.id,
             value,
+            local: false,
         });
     }
 
