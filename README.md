@@ -97,34 +97,43 @@ no clock, so it can be driven from any runtime or from WASM.
 
 ## Releasing
 
-The five published crates share one version (workspace `version`) and are published
-together, by CI, when a version tag is pushed:
+The five published crates share one version and are published together by
+CI. A release is one button and one merge:
 
-1. In a PR: bump `version` in the root `Cargo.toml` and on each
-   `nt4-proto` / `nt4-core` / `nt4-derive` / `nt4` / `nt4-wpimath` path dependency, and rename
-   `CHANGELOG.md`'s `Unreleased` section to `<version> (<date>)`. Merge it.
-   (The bump can come earlier: once one crate needs an unreleased change in
-   another, CI's `cargo publish --dry-run` fails until the version is past
-   the one on crates.io. 0.2.0 was bumped that way, with the derive.)
-2. Tag the merge commit on `main` and push the tag:
-   ```bash
-   git fetch origin && git tag v0.2.0 origin/main && git push origin v0.2.0
-   ```
-3. The `Release` workflow (`.github/workflows/release.yml`) checks that the
-   tag matches the crates' version, that the commit is on `main` with CI
-   passed, and that the changelog has the section. Then it publishes
-   `nt4-proto`, `nt4-core`, `nt4-derive`, `nt4` and `nt4-wpimath` in that order with the
-   a short-lived token from crates.io trusted publishing (each crate on
-   crates.io trusts this repository's `release.yml` in the `Deploy`
-   environment), and creates the GitHub
-   release from the changelog section.
+1. While working, add what changed to the `## Unreleased` section at the
+   top of `CHANGELOG.md` (create it if there isn't one).
+2. **Actions > Prepare release > Run workflow**, and type the version
+   (`0.4.0`; `0.4.0-alpha.1` makes a pre-release). It runs
+   `scripts/prepare_release.py`, which sets the version (all in the root
+   `Cargo.toml`: the workspace version and the published crates'
+   `[workspace.dependencies]`), renames `## Unreleased` to
+   `## <version> (<date>)` and updates the READMEs' install lines, then
+   opens a PR "Release <version>". It refuses a version that isn't newer,
+   or an empty or missing Unreleased section.
+3. Merge the PR. When CI passes on `main`, `release.yml` sees a version
+   with no tag yet: it checks the changelog and a `cargo publish --dry-run`,
+   tags the commit `v<version>`, publishes `nt4-proto`, `nt4-core`,
+   `nt4-derive`, `nt4` and `nt4-wpimath` in that order (with a short-lived
+   token from crates.io trusted publishing: each crate trusts this
+   repository's `release.yml` in the `Deploy` environment), and creates the
+   GitHub release from the changelog section.
+
+GitHub doesn't run CI on a PR a workflow opens, so the release PR shows no
+checks: CI runs on `main` after the merge, and nothing is published unless
+it passes. Opening the PR needs **Settings > Actions > General > Allow GitHub
+Actions to create and approve pull requests**; without it the workflow
+pushes the branch and links to opening the PR by hand.
+
+The script also runs locally (`python3 scripts/prepare_release.py 0.4.0`,
+then `cargo update --workspace`) if you'd rather make the release PR
+yourself; merging it releases the same way. Pushing a tag `v<version>` on a
+commit on `main` still works too.
 
 If publishing fails partway, re-run the workflow: crates already on
 crates.io at that version are skipped. A published version can't be
 changed or reused (only yanked), so fix forward with the next patch
-version. A tag like `v0.2.0-alpha.1` makes a pre-release. CI runs
-`cargo publish --dry-run` on every push, so packaging problems show up
-before a release.
+version. CI runs `cargo publish --dry-run` on every push, so packaging
+problems show up before a release.
 
 ## Development
 

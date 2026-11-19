@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "nt4"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "nt4-core",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-bench"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "nt4",
  "serde_json",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-core"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "nt4-proto",
  "serde_json",
@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-derive"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "nt4",
  "proc-macro2",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-fuzz"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "cc",
  "nt4-core",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-perf"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "gungraun",
  "nt4-core",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-photon"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "hex",
  "md-5",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-proto"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "hex",
  "rmp",
@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "nt4-wpimath"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "nt4",
  "serde_json",

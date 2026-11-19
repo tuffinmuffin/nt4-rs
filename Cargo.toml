@@ -3,13 +3,21 @@ resolver = "3"
 members = ["crates/nt4-proto", "crates/nt4-core", "crates/nt4-derive", "crates/nt4", "crates/nt4-wpimath", "crates/nt4-photon", "crates/nt4-bench", "crates/nt4-fuzz", "crates/nt4-perf"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/tuffinmuffin/nt4-rs"
 rust-version = "1.85"
 
 [workspace.dependencies]
+# The published crates, for each other. Their version is the workspace's:
+# scripts/prepare_release.py keeps these in step (see "Releasing" in
+# README.md), so a release edits only this file and CHANGELOG.md.
+nt4-proto = { path = "crates/nt4-proto", version = "0.2.0" }
+nt4-core = { path = "crates/nt4-core", version = "0.2.0" }
+nt4-derive = { path = "crates/nt4-derive", version = "0.2.0" }
+nt4 = { path = "crates/nt4", version = "0.2.0", default-features = false }
+nt4-wpimath = { path = "crates/nt4-wpimath", version = "0.2.0" }
 # float_roundtrip: parse numbers exactly, as ntcore does (the default parser
 # can be off by one in the last place).
 serde_json = { version = "1", features = ["float_roundtrip"] }
