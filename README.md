@@ -13,8 +13,9 @@ MessagePack binary frames for values. The protocol is described in
 
 ## Status
 
-Client and server are done and tested against ntcore; 0.1 is on
-crates.io and 0.2 is in progress. Current state and next steps are in
+Client and server are done and tested against ntcore, and published on
+crates.io ([CHANGELOG.md](CHANGELOG.md) lists each release). Current state
+and next steps are in
 [docs/STATUS.md](docs/STATUS.md).
 
 | Crate | What it does |

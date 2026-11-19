@@ -457,6 +457,13 @@ check is enough.
       Settings > Trusted Publishing on crates.io. Once that is set up for
       all five, delete the `CARGO_REGISTRY_TOKEN` secret (and revoke the
       token on crates.io).
+   7. 0.3.0 (PR #25 and the release PR): local values follow ntcore's local
+      storage (a program sees what it writes, older values don't win,
+      defaults, duplicates, reset of topics that are gone), the server
+      clock carries on across restarts, and `tests/conformance.rs` checks
+      scenarios four ways against ntcore. The weekly upstream watch also
+      runs the interop suites against the newest 2027 pyntcore
+      (`interop-latest`), opening an `interop-watch` issue on failure.
 4. **`nt4-photon`, before publishing it** (it is `publish = false` and
    out of `release.yml`'s `CRATES`; nt4 and the other crates don't need
    it):

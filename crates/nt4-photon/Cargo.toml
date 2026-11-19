@@ -15,11 +15,11 @@ categories = ["encoding", "science::robotics"]
 publish = false
 
 [dependencies]
-nt4 = { path = "../nt4", version = "0.2.0", default-features = false }
-nt4-wpimath = { path = "../nt4-wpimath", version = "0.2.0" }
+nt4 = { path = "../nt4", version = "0.3.0", default-features = false }
+nt4-wpimath = { path = "../nt4-wpimath", version = "0.3.0" }
 
 [dev-dependencies]
-nt4 = { path = "../nt4", version = "0.2.0", features = ["client", "server"] }
+nt4 = { path = "../nt4", version = "0.3.0", features = ["client", "server"] }
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
 serde_json.workspace = true
 md-5 = "0.10"

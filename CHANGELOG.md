@@ -4,7 +4,7 @@ The library crates (`nt4-proto`, `nt4-core`, `nt4-derive`, `nt4`,
 `nt4-wpimath`) share one version number. Pushing the tag `v<version>` publishes them; see "Releasing"
 in README.md.
 
-## Unreleased (0.3.0)
+## 0.3.0 (2026-11-19)
 
 Local values now follow ntcore's local storage, so a program sees the values
 it writes. Found while building a dashboard: a toggle kept showing its old
