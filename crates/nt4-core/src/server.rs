@@ -152,7 +152,9 @@ pub enum Event {
         /// True when this answers the server's own `set_properties`.
         ack: bool,
     },
-    /// A client set a value on a topic the server subscribes to.
+    /// A topic the server subscribes to got a new value: from a client, or
+    /// set by the server itself (`local`), as ntcore's value listeners hear
+    /// both.
     Value {
         /// Topic name.
         name: Arc<str>,
@@ -160,6 +162,8 @@ pub enum Event {
         id: i32,
         /// The value. Local and server time are the same on the server.
         value: TopicValue,
+        /// True when the server set it with [`ServerCore::set_value`].
+        local: bool,
     },
     /// A client sent something that couldn't be used, or the server ignored
     /// a request. The text matches ntcore's log messages.
@@ -371,6 +375,7 @@ fn send_value_to(
                 server_time_us: time_us,
                 local_time_us: time_us,
             },
+            local: false,
         }),
         Some(r) => r
             .outgoing
@@ -814,6 +819,16 @@ impl ServerCore {
                 got: value.type_id(),
             });
         }
+        let current = self.topic_mut(publisher.topic).last_value.as_ref();
+        // As in ntcore's local storage: a default only fills a topic with no
+        // value (SetDefaultEntryValue), and setting the value the topic
+        // already has sends nothing (PublishLocalValue).
+        if time_us == 0 && current.is_some() {
+            return Ok(());
+        }
+        if current.is_some_and(|(_, v)| *v == value) {
+            return Ok(());
+        }
         self.client_set_value(LOCAL, id.0, time_us, &value);
         Ok(())
     }
@@ -825,8 +840,9 @@ impl ServerCore {
     }
 
     /// Subscribe from the server. What arrives comes out of
-    /// [`poll_event`](Self::poll_event); the server's own values are not
-    /// echoed back.
+    /// [`poll_event`](Self::poll_event), including values the server sets
+    /// itself (with `local` set), as in ntcore. Values older than the
+    /// topic's are still forwarded to clients but don't arrive here.
     ///
     /// ```
     /// use nt4_core::{ProtocolVersion, ServerCore, ServerEvent};
@@ -1473,6 +1489,13 @@ impl ServerCore {
     /// the sender. `sender` is `None` for the server's meta topics.
     fn set_value_from(&mut self, sender: Option<usize>, topic: usize, time_us: i64, value: &Value) {
         let t = self.topic_mut(topic);
+        // The server's own subscribers follow ntcore's local storage: a value
+        // older than the topic's isn't taken (anything replaces a default).
+        // Clients still get every value, as ServerImpl forwards them all.
+        let local_newer = match &t.last_value {
+            None => true,
+            Some((last_time, _)) => *last_time == 0 || time_us >= *last_time,
+        };
         // Keep the value if it comes from the same client, or is not older.
         let newer = match &t.last_value {
             None => true,
@@ -1491,7 +1514,27 @@ impl ServerCore {
         // list of their own (this runs for every value relayed).
         let t = self.topics[topic].as_ref().expect("topic exists");
         for (&slot, tcd) in &t.clients {
-            if Some(slot) == sender || tcd.send_mode == SendMode::Disabled {
+            if tcd.send_mode == SendMode::Disabled {
+                continue;
+            }
+            if slot == LOCAL {
+                // Including the server's own writes, which its own
+                // subscribers hear as local values.
+                if local_newer {
+                    self.events.push_back(Event::Value {
+                        name: t.name.clone(),
+                        id: topic as i32,
+                        value: TopicValue {
+                            value: value.clone(),
+                            server_time_us: time_us,
+                            local_time_us: time_us,
+                        },
+                        local: sender == Some(LOCAL),
+                    });
+                }
+                continue;
+            }
+            if Some(slot) == sender {
                 continue;
             }
             send_value_to(

@@ -152,6 +152,8 @@ async fn run_robot(port: u16, seconds: f64, scale: usize) {
     let options = PublishOptions {
         periodic: Some(0.02),
         send_all: true,
+        // As the ntcore side (bench/robot_sim.py) publishes.
+        keep_duplicates: true,
     };
     let publish = |name: String, ty: NtType| -> (NtType, GenericPublisher) {
         (

@@ -764,3 +764,98 @@ fn tick_period_follows_subscriptions() {
     send(&mut server, a, &[ClientMessage::Unsubscribe { subuid: 1 }]);
     assert_eq!(server.tick_period_ms(a), 100);
 }
+
+// ----- The server's own values, audited against ntcore's LocalStorage -----
+// Written by Claude. ntcore's server code reads and writes through the same
+// local storage as a client, so the client's local value rules apply.
+
+fn value_frame(id: i32, timestamp_us: i64, v: f64) -> Vec<u8> {
+    let mut frame = Vec::new();
+    encode_binary(
+        &mut frame,
+        &BinaryMessage {
+            id,
+            timestamp_us,
+            value: Value::Double(v),
+        },
+    );
+    frame
+}
+
+/// The values in `events`, as (value, local).
+fn event_values(events: &[ServerEvent]) -> Vec<(Value, bool)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            ServerEvent::Value { value, local, .. } => Some((value.value.clone(), *local)),
+            _ => None,
+        })
+        .collect()
+}
+
+// S1: the server's own subscriber hears the server's own writes, flagged
+// local (LocalStorage SetValue notifies local subscribers).
+#[test]
+fn the_servers_own_subscriber_hears_its_own_writes() {
+    let mut server = ServerCore::new();
+    server.subscribe(vec!["/x".into()], Default::default());
+    let p = server.publish("/x", NtType::Double, Properties::new());
+    events(&mut server);
+    server.set_value(p, Value::Double(1.5), 100).unwrap();
+    assert_eq!(
+        event_values(&events(&mut server)),
+        [(Value::Double(1.5), true)]
+    );
+}
+
+// S3: an older value than the topic has is still forwarded to clients (as
+// ServerImpl does), but the server's own subscriber doesn't take it, as
+// LocalStorage SetValue ignores older values.
+#[test]
+fn an_older_value_is_forwarded_but_not_heard_locally() {
+    let mut server = ServerCore::new();
+    server.subscribe(vec!["/x".into()], Default::default());
+    let a = add(&mut server, "a");
+    let b = add(&mut server, "b");
+    send(&mut server, a, &[publish("/x", 1, Properties::new())]);
+    send(&mut server, b, &[publish("/x", 1, Properties::new())]);
+    events(&mut server);
+    server.handle_binary(a, 0, &value_frame(1, 2_000, 1.0));
+    server.handle_binary(b, 0, &value_frame(1, 1_000, 2.0));
+    assert_eq!(
+        event_values(&events(&mut server)),
+        [(Value::Double(1.0), false)]
+    );
+}
+
+// S4: the server setting the value a topic already has sends nothing
+// (LocalStorage PublishLocalValue skips duplicates).
+#[test]
+fn the_server_setting_the_same_value_twice_sends_it_once() {
+    let mut server = ServerCore::new();
+    let a = add(&mut server, "a");
+    send(&mut server, a, &[subscribe(&["/x"], Default::default())]);
+    let p = server.publish("/x", NtType::Double, Properties::new());
+    flush(&mut server, a, 100);
+    server.set_value(p, Value::Double(1.0), 1_000).unwrap();
+    let first = values(&flush(&mut server, a, 300)).len();
+    server.set_value(p, Value::Double(1.0), 2_000).unwrap();
+    let second = values(&flush(&mut server, a, 600)).len();
+    assert_eq!((first, second), (1, 0));
+}
+
+// S5: a default from the server on a topic that has a value does nothing
+// at all (SetDefaultEntryValue only fills an empty topic).
+#[test]
+fn a_server_default_on_a_topic_with_a_value_sends_nothing() {
+    let mut server = ServerCore::new();
+    let a = add(&mut server, "a");
+    let b = add(&mut server, "b");
+    send(&mut server, a, &[publish("/x", 1, Properties::new())]);
+    server.handle_binary(a, 0, &value_frame(1, 1_000, 3.0));
+    send(&mut server, b, &[subscribe(&["/x"], Default::default())]);
+    flush(&mut server, b, 100);
+    let p = server.publish("/x", NtType::Double, Properties::new());
+    server.set_value(p, Value::Double(9.0), 0).unwrap();
+    assert!(values(&flush(&mut server, b, 300)).is_empty());
+}

@@ -234,6 +234,7 @@ fn announce_value_properties_unannounce() {
                 name: "/other".into(),
                 id: 8,
                 value: expected.clone(),
+                local: false,
             },
             Event::Warning("received unknown id 99".into()),
         ]
@@ -589,4 +590,198 @@ fn set_properties_right_after_publish_is_sent_after_it() {
         })
         .collect();
     assert_eq!(methods, ["publish", "setproperties"]);
+}
+
+// Written by Claude. In ntcore a value set through a publisher is the
+// topic's value for that client straight away (LocalStorage keeps one value
+// per topic, local or remote). The server doesn't send a client's own
+// values back, so the client has to keep them.
+#[test]
+fn our_own_writes_are_the_topics_value() {
+    let mut client = ClientCore::new();
+    let p = double_pub(&mut client, "/mine");
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(1_000, &server_text(&[announce("/mine", 7, Some(p.uid()))]));
+    drain_events(&mut client);
+
+    client.set_value(p, Value::Double(2.5), 2_000).unwrap();
+    let topic = client.topic_by_name("/mine").expect("announced");
+    assert_eq!(
+        topic.value.as_ref().map(|v| (&v.value, v.local_time_us)),
+        Some((&Value::Double(2.5), 2_000))
+    );
+}
+
+// Written by Claude. The case dashboards hit: robot code published the topic
+// first, then this client publishes it too and writes a new value.
+#[test]
+fn our_own_writes_replace_a_value_from_elsewhere() {
+    let mut client = ClientCore::new();
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(1_000, &server_text(&[announce("/robot", 3, None)]));
+    let mut frame = Vec::new();
+    encode_binary(&mut frame, &value_msg(3, OFFSET + 1_500, 1.0));
+    client.handle_binary(1_600, &frame);
+    drain_events(&mut client);
+
+    let p = double_pub(&mut client, "/robot");
+    client.set_value(p, Value::Double(4.0), 3_000).unwrap();
+    assert_eq!(
+        client
+            .topic_by_name("/robot")
+            .and_then(|t| t.value.as_ref())
+            .map(|v| &v.value),
+        Some(&Value::Double(4.0))
+    );
+}
+
+// ----- Local values, audited against ntcore's LocalStorageImpl.cpp -----
+// Written by Claude. Each test names the ntcore rule it checks.
+
+/// The topic's value as (value, local time), if it has one.
+fn value_of(client: &ClientCore, name: &str) -> Option<(Value, i64)> {
+    client
+        .topic_by_name(name)
+        .and_then(|t| t.value.as_ref())
+        .map(|v| (v.value.clone(), v.local_time_us))
+}
+
+/// A value from the server for topic `id`, stamped at local time `local_us`.
+fn incoming(client: &mut ClientCore, id: i32, local_us: i64, d: f64) {
+    let mut frame = Vec::new();
+    encode_binary(&mut frame, &value_msg(id, local_us + OFFSET, d));
+    client.handle_binary(local_us + 100, &frame);
+}
+
+// StorageImpl::SetValue keeps a value only if it isn't older than the one
+// there, so a robot value that was in flight when we wrote doesn't undo
+// our write; a newer one does.
+#[test]
+fn an_older_value_from_the_server_does_not_undo_our_write() {
+    let mut client = ClientCore::new();
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(1_000, &server_text(&[announce("/robot", 3, None)]));
+    let p = double_pub(&mut client, "/robot");
+    client.set_value(p, Value::Double(4.0), 3_000).unwrap();
+    // Stamped before our write: ignored.
+    incoming(&mut client, 3, 2_000, 1.0);
+    assert_eq!(
+        value_of(&client, "/robot"),
+        Some((Value::Double(4.0), 3_000))
+    );
+    // Stamped after: the robot's value wins.
+    incoming(&mut client, 3, 5_000, 9.0);
+    assert_eq!(
+        value_of(&client, "/robot"),
+        Some((Value::Double(9.0), 5_000))
+    );
+}
+
+// StorageImpl::SetDefaultEntryValue only sets a value when the topic has
+// none, and SetValue lets any value replace one stamped 0 (a default).
+#[test]
+fn a_default_never_replaces_a_value_and_anything_replaces_a_default() {
+    let mut client = ClientCore::new();
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(
+        1_000,
+        &server_text(&[announce("/robot", 3, None), announce("/new", 4, None)]),
+    );
+    incoming(&mut client, 3, 2_000, 1.0);
+    let p = double_pub(&mut client, "/robot");
+    client.set_value(p, Value::Double(5.0), 0).unwrap();
+    assert_eq!(
+        value_of(&client, "/robot"),
+        Some((Value::Double(1.0), 2_000))
+    );
+
+    let q = double_pub(&mut client, "/new");
+    client.set_value(q, Value::Double(5.0), 0).unwrap();
+    assert_eq!(value_of(&client, "/new"), Some((Value::Double(5.0), 0)));
+    incoming(&mut client, 4, 1_500, 6.0);
+    assert_eq!(value_of(&client, "/new"), Some((Value::Double(6.0), 1_500)));
+}
+
+// StorageImpl::PublishLocalValue doesn't send a value equal to the last
+// one sent (unless the publisher keeps duplicates).
+#[test]
+fn the_same_value_twice_is_sent_once() {
+    let mut client = ClientCore::new();
+    let p = double_pub(&mut client, "/x");
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    drain_transmit(&mut client);
+    // Each a send period apart (see values_coalesce_unless_send_all).
+    client.set_value(p, Value::Double(1.0), 20_000).unwrap();
+    client.send_outgoing(200_000, true);
+    client.set_value(p, Value::Double(1.0), 300_000).unwrap();
+    client.send_outgoing(500_000, true);
+    let values: Vec<_> = drain_transmit(&mut client)
+        .into_iter()
+        .filter(|o| matches!(o, Out::Binary(_)))
+        .collect();
+    assert_eq!(
+        values,
+        [Out::Binary(vec![value_msg(p.uid(), 20_000 + OFFSET, 1.0)])]
+    );
+}
+
+// A value set before connecting is the topic's value (ntcore keeps it in
+// the topic), and StartNetwork sends it; once our publish is announced, the
+// topic shows it, as the server won't send it back.
+#[test]
+fn a_write_before_connecting_is_the_value_once_announced() {
+    let mut client = ClientCore::new();
+    let p = double_pub(&mut client, "/early");
+    client.set_value(p, Value::Double(3.0), 500).unwrap();
+    connect_synced(&mut client, 1_000, ProtocolVersion::V4_1);
+    client.handle_text(1_100, &server_text(&[announce("/early", 9, Some(p.uid()))]));
+    assert_eq!(value_of(&client, "/early"), Some((Value::Double(3.0), 500)));
+}
+
+// ClearNetwork keeps a topic we still publish (it still exists), with its
+// value; after reconnecting it shows that value again.
+#[test]
+fn our_topic_keeps_its_value_across_a_reconnect() {
+    let mut client = ClientCore::new();
+    let p = double_pub(&mut client, "/kept");
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(100, &server_text(&[announce("/kept", 2, Some(p.uid()))]));
+    client.set_value(p, Value::Double(8.0), 200).unwrap();
+    client.disconnect("bye");
+    connect_synced(&mut client, 10_000, ProtocolVersion::V4_1);
+    client.handle_text(10_100, &server_text(&[announce("/kept", 5, Some(p.uid()))]));
+    assert_eq!(value_of(&client, "/kept"), Some((Value::Double(8.0), 200)));
+}
+
+// Two publishers of one topic share its value: the last write wins.
+#[test]
+fn two_of_our_publishers_share_the_topics_value() {
+    let mut client = ClientCore::new();
+    let a = double_pub(&mut client, "/both");
+    let b = double_pub(&mut client, "/both");
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(100, &server_text(&[announce("/both", 4, Some(a.uid()))]));
+    client.set_value(a, Value::Double(1.0), 1_000).unwrap();
+    client.set_value(b, Value::Double(2.0), 2_000).unwrap();
+    assert_eq!(
+        value_of(&client, "/both"),
+        Some((Value::Double(2.0), 2_000))
+    );
+}
+
+// Written by Claude. The server answering our publish of a topic it already
+// has (an announce with our pubuid, same id) mustn't wipe the topic's value:
+// ntcore's NetworkAnnounce ignores that ack.
+#[test]
+fn the_server_answering_our_publish_keeps_the_topics_value() {
+    let mut client = ClientCore::new();
+    connect_synced(&mut client, 0, ProtocolVersion::V4_1);
+    client.handle_text(1_000, &server_text(&[announce("/robot", 3, None)]));
+    incoming(&mut client, 3, 2_000, 1.0);
+    let p = double_pub(&mut client, "/robot");
+    client.handle_text(3_000, &server_text(&[announce("/robot", 3, Some(p.uid()))]));
+    assert_eq!(
+        value_of(&client, "/robot"),
+        Some((Value::Double(1.0), 2_000))
+    );
 }

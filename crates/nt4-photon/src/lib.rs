@@ -68,6 +68,8 @@ pub fn publish_options() -> PublishOptions {
     PublishOptions {
         periodic: Some(0.01),
         send_all: true,
+        // PhotonVision keeps duplicates too: every frame's result is sent.
+        keep_duplicates: true,
     }
 }
 

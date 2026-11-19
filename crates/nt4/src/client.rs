@@ -136,10 +136,20 @@ impl Shared {
     /// each to [`Client::events`] listeners.
     fn dispatch_events(&self, state: &mut State) {
         while let Some(event) = state.core.poll_event() {
-            if let Event::Value { name, value, .. } = &event {
-                if let Some(w) = state.watchers.get(&**name) {
-                    w.send_replace(Some(value.clone()));
+            match &event {
+                Event::Value { name, value, .. } => {
+                    if let Some(w) = state.watchers.get(&**name) {
+                        w.send_replace(Some(value.clone()));
+                    }
                 }
+                // Like ntcore, a topic that no longer exists (gone from the
+                // server and not published here) has no value any more.
+                Event::Unannounced { name, .. } if !state.core.publishes(name) => {
+                    if let Some(w) = state.watchers.get(&**name) {
+                        w.send_replace(None);
+                    }
+                }
+                _ => {}
             }
             // Drop listeners whose `Events` was dropped.
             state.listeners.retain(|l| l.send(event.clone()).is_ok());
@@ -152,7 +162,14 @@ impl Backend for Shared {
         Shared::now_us(self)
     }
     fn set_value(&self, id: PubId, value: Value, time_us: i64) -> Result<(), ClientError> {
-        self.lock().core.set_value(id, value, time_us)
+        let mut state = self.lock();
+        state.core.set_value(id, value, time_us)?;
+        // Our own value reaches our subscribers and listeners now, as in
+        // ntcore; the server doesn't send it back.
+        self.dispatch_events(&mut state);
+        drop(state);
+        self.wake.notify_one();
+        Ok(())
     }
     fn unpublish(&self, id: PubId) {
         self.lock().core.unpublish(id);
@@ -343,7 +360,7 @@ impl Client {
         let mut state = self.shared.lock();
         let id = state.core.subscribe(vec![name.to_owned()], options);
         // Start from the value we already have, if any.
-        let current = state.core.topic_by_name(name).and_then(|t| t.value.clone());
+        let current = state.core.value(name);
         let rx = state
             .watchers
             .entry(name.to_owned())
@@ -385,7 +402,8 @@ impl Client {
     }
 
     /// Everything that happens from now on: connections, announcements,
-    /// values, time sync and warnings, in order and without gaps.
+    /// values (from the server, and the ones this client sets, with
+    /// `local` set), time sync and warnings, in order and without gaps.
     ///
     /// Like ntcore's listener queues, the queue has no size limit: read it
     /// steadily, or drop the [`Events`] to stop collecting.
