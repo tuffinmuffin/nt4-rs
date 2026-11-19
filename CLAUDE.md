@@ -76,6 +76,11 @@ benchmark all use pyntcore 2027.0.0a8); ntcore 2026 behavior is not tracked.
   each test; list cases that can't apply in `scripts/upstream_na.txt` with the
   reason. When bumping `ALLWPILIB_COMMIT` in CI, update the headers too.
 - Tests written by Claude say so in a comment.
+- Note user-visible changes in `CHANGELOG.md` under `## Unreleased` (add the
+  heading if it's missing). Don't change versions by hand: the Prepare
+  release workflow (`scripts/prepare_release.py`) sets them all, in the root
+  `Cargo.toml`; see "Releasing" in README.md. Published crates depend on
+  each other through `[workspace.dependencies]` (`nt4.workspace = true`).
 - Public items need docs (`missing_docs` is on); add a `///` example to
   anything users call directly.
 - The published crates support Rust 1.85 (`rust-version`, checked by the CI
