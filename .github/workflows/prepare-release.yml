@@ -1,0 +1,76 @@
+name: Prepare release
+
+# The button that starts a release (Actions > Prepare release > Run
+# workflow): type the version, and this sets it everywhere and dates the
+# changelog's Unreleased section (scripts/prepare_release.py), then opens a
+# pull request "Release <version>". Merging that PR is the release: once CI
+# passes on main, release.yml tags the merge commit and publishes. See
+# "Releasing" in README.md.
+#
+# GitHub doesn't run CI on a pull request opened by a workflow's own token,
+# so the release PR itself shows no checks; CI runs on main after the merge,
+# and release.yml waits for it to pass before publishing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, such as 0.3.0 (or 0.4.0-alpha.1 for a pre-release)"
+        required: true
+
+permissions:
+  contents: write # to push the release branch
+  pull-requests: write # to open the release PR
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set the version and date the changelog
+        run: |
+          VERSION=${VERSION#v}
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::v$VERSION is already tagged."
+            exit 1
+          fi
+          python3 scripts/prepare_release.py "$VERSION"
+          cargo update --workspace
+          cargo publish --workspace --dry-run
+
+      - name: Open the release PR
+        run: |
+          branch="release/v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "Release $VERSION"
+          git push --force origin "$branch"
+          body="Sets the version to $VERSION and dates its CHANGELOG.md section.
+
+          **Merging this releases $VERSION**: when CI passes on main, release.yml tags the merge commit \`v$VERSION\`, publishes the crates to crates.io and creates the GitHub release.
+
+          Made by the Prepare release workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. GitHub doesn't run CI on PRs opened by a workflow, so this PR has no checks; CI on main gates the release."
+          if url=$(gh pr create --base main --head "$branch" --title "Release $VERSION" --body "$body" 2>&1); then
+            echo "Release PR: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            # Needs "Allow GitHub Actions to create and approve pull
+            # requests" (Settings > Actions > General). The branch is pushed
+            # either way, so the PR can be opened by hand.
+            echo "$url"
+            echo "Couldn't open the PR. Open it by hand: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$branch?expand=1" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,12 +1,25 @@
 name: Release
 
-# Pushing a tag `v<version>` (for example `v0.1.0`) publishes the five
-# library crates to crates.io and creates a GitHub release from that
-# version's CHANGELOG.md section. See "Releasing" in README.md.
+# Publishes the five library crates to crates.io and creates a GitHub
+# release from the version's CHANGELOG.md section. Two ways in (see
+# "Releasing" in README.md):
+#
+# - Usually: merge the "Release <version>" PR that prepare-release.yml
+#   opens. When CI then passes on main, this runs (workflow_run), sees that
+#   the crates' version has no tag yet, tags that commit `v<version>` and
+#   publishes. A CI run on main whose version is already tagged does nothing.
+# - By hand: push a tag `v<version>` on a commit on main.
+#
+# crates.io trusts this file (by name) in the Deploy environment, so
+# publishing stays here.
 
 on:
   push:
     tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 # One release at a time; never cancel one halfway through publishing.
 concurrency:
@@ -21,27 +34,51 @@ env:
 jobs:
   # Everything that can stop a bad release, before anything is published.
   check:
+    # From CI: only a passed run of a push to main (not a pull request).
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read # to read the CI run of the tagged commit
+    env:
+      # The commit to release: the tagged one, or the one CI passed on.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     outputs:
+      release: ${{ steps.version.outputs.release }}
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ env.SHA }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.SHA }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: The tag matches the crates' version
+      - name: The version to release, and its tag
         id: version
         run: |
           version=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "nt4") | .version')
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match the workspace version $version. Bump the version in Cargo.toml (or fix the tag)."
-            exit 1
+          tag="v$version"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            if [ "$tag" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME doesn't match the workspace version $version. Bump the version in Cargo.toml (or fix the tag)."
+              exit 1
+            fi
+          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            # The usual case: CI passed on main, nothing new to release.
+            echo "$tag is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            echo "main is at $version, which has no tag yet: releasing $tag."
           fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           for c in $CRATES; do
             v=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$c" '.packages[] | select(.name == $c) | .version')
@@ -52,14 +89,16 @@ jobs:
           done
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: The tagged commit is on main
+      - name: The commit is on main
+        if: steps.version.outputs.release == 'true'
         run: |
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::$GITHUB_REF_NAME points at a commit that isn't on main. Tag a commit on main."
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA isn't on main. Release a commit on main."
             exit 1
           fi
 
       - name: CHANGELOG.md has a section for this version
+        if: steps.version.outputs.release == 'true'
         run: |
           version=${{ steps.version.outputs.version }}
           if ! grep -qE "^## $version( |$)" CHANGELOG.md; then
@@ -71,14 +110,16 @@ jobs:
       # ntcore and the MSRV build. Wait for that run on this commit and
       # require it to have passed, rather than repeating it here.
       - name: CI passed on this commit
+        # From workflow_run it already has; a pushed tag waits for it.
+        if: steps.version.outputs.release == 'true' && github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           for _ in $(seq 1 90); do
-            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" \
               --event push --limit 1 --json status,conclusion,url --jq '.[0] // empty')
             if [ -z "$run" ]; then
-              echo "No CI run for $GITHUB_SHA yet; waiting."
+              echo "No CI run for $SHA yet; waiting."
             elif [ "$(jq -r .status <<<"$run")" != completed ]; then
               echo "CI is still running: $(jq -r .url <<<"$run")"
             elif [ "$(jq -r .conclusion <<<"$run")" = success ]; then
@@ -90,13 +131,15 @@ jobs:
             fi
             sleep 60
           done
-          echo "::error::Gave up waiting for CI on $GITHUB_SHA after 90 minutes."
+          echo "::error::Gave up waiting for CI on $SHA after 90 minutes."
           exit 1
 
       - run: cargo publish --workspace --dry-run
+        if: steps.version.outputs.release == 'true'
 
   publish:
     needs: check
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     # crates.io trusts this repository's release.yml in the Deploy
     # environment (each crate's Settings > Trusted Publishing on crates.io).
@@ -105,9 +148,26 @@ jobs:
     permissions:
       contents: write # to create the GitHub release
       id-token: write # for the crates.io trusted publishing token
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
+      SHA: ${{ needs.check.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
+
+      # From a merged release PR there's no tag yet: make it on the commit
+      # CI passed on. (A tag pushed with this workflow's token doesn't start
+      # this workflow again.)
+      - name: Tag the release
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG exists already."
+          else
+            git tag "$TAG" "$SHA"
+            git push origin "$TAG"
+          fi
 
       # A crates.io token for this run only (it lasts 30 minutes and is
       # revoked when the job ends), instead of a long-lived secret.
@@ -160,8 +220,8 @@ jobs:
           # A release made first in GitHub's web page (which also makes the
           # tag) gets the same title, flags and notes, and is published if
           # it was left as a draft.
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" "${args[@]}" --draft=false
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" "${args[@]}" --draft=false
           else
-            gh release create "$GITHUB_REF_NAME" "${args[@]}" --verify-tag
+            gh release create "$TAG" "${args[@]}" --verify-tag
           fi

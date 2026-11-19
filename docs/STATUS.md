@@ -464,6 +464,12 @@ check is enough.
       scenarios four ways against ntcore. The weekly upstream watch also
       runs the interop suites against the newest 2027 pyntcore
       (`interop-latest`), opening an `interop-watch` issue on failure.
+      Releasing is now a button (Actions > Prepare release, which runs
+      `scripts/prepare_release.py` and opens a "Release <version>" PR) and
+      a merge (`release.yml` tags and publishes once CI passes on main).
+      0.3.0 was published by that second half: main was already at an
+      untagged 0.3.0 when the workflow landed, so CI passing after that
+      merge released it. The button's first real run is the next release.
 4. **`nt4-photon`, before publishing it** (it is `publish = false` and
    out of `release.yml`'s `CRATES`; nt4 and the other crates don't need
    it):
