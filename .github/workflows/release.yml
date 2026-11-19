@@ -1,25 +1,29 @@
 name: Release
 
 # Publishes the five library crates to crates.io and creates a GitHub
-# release from the version's CHANGELOG.md section. Two ways in (see
+# release from the version's CHANGELOG.md section. Three ways in (see
 # "Releasing" in README.md):
 #
 # - Usually: merge the "Release <version>" PR that prepare-release.yml
-#   opens. When CI then passes on main, this runs (workflow_run), sees that
-#   the crates' version has no tag yet, tags that commit `v<version>` and
-#   publishes. A CI run on main whose version is already tagged does nothing.
+#   opens. The merge's push to main starts this; it sees that the crates'
+#   version has no tag yet, waits for CI to pass on that commit, tags it
+#   `v<version>` and publishes. A push to main whose version is already
+#   tagged does nothing.
+# - Retry (Actions > Release > Run workflow): releases main's version again.
+#   If its tag exists, the tagged commit is what's released. Crates already
+#   on crates.io are skipped, so a release that stopped partway finishes.
 # - By hand: push a tag `v<version>` on a commit on main.
 #
 # crates.io trusts this file (by name) in the Deploy environment, so
-# publishing stays here.
+# publishing stays here. Its trusted publishing accepts push and
+# workflow_dispatch runs, not workflow_run, which is why a merge is caught by
+# its push rather than by CI finishing.
 
 on:
   push:
-    tags: ["v*"]
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
     branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
 
 # One release at a time; never cancel one halfway through publishing.
 concurrency:
@@ -34,60 +38,72 @@ env:
 jobs:
   # Everything that can stop a bad release, before anything is published.
   check:
-    # From CI: only a passed run of a push to main (not a pull request).
-    if: >-
-      github.event_name == 'push' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # to read the CI run of the tagged commit
-    env:
-      # The commit to release: the tagged one, or the one CI passed on.
-      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      actions: read # to read the CI run of the commit
     outputs:
       release: ${{ steps.version.outputs.release }}
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
-      sha: ${{ env.SHA }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SHA }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: The version to release, and its tag
+      # Which commit to release, as SHA (also set for the steps after this).
+      - name: The version to release, its tag and commit
         id: version
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "nt4") | .version')
+          crate_version() {
+            cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg c "$1" '.packages[] | select(.name == $c) | .version'
+          }
+          version=$(crate_version nt4)
           tag="v$version"
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
+          sha=$GITHUB_SHA
+          tagged=$(git rev-list -n 1 "refs/tags/$tag" 2>/dev/null || true)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
             if [ "$tag" != "$GITHUB_REF_NAME" ]; then
               echo "::error::Tag $GITHUB_REF_NAME doesn't match the workspace version $version. Bump the version in Cargo.toml (or fix the tag)."
               exit 1
             fi
-          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            # The usual case: CI passed on main, nothing new to release.
-            echo "$tag is already released; nothing to do."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          else
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            if [ -n "$tagged" ]; then
+              # The usual case: a push to main, nothing new to release.
+              echo "$tag is already released; nothing to do."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "main is at $version, which has no tag yet: releasing $tag."
+          elif [ -n "$tagged" ]; then
+            # A retry of a tagged release: release what the tag points at.
+            echo "Releasing $tag again, from its commit $tagged."
+            sha=$tagged
+            git checkout -q "$sha"
+            if [ "$(crate_version nt4)" != "$version" ]; then
+              echo "::error::$tag points at a commit whose version isn't $version."
+              exit 1
+            fi
+          else
+            echo "Releasing $tag from $sha."
           fi
-          echo "release=true" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           for c in $CRATES; do
-            v=$(cargo metadata --no-deps --format-version 1 \
-              | jq -r --arg c "$c" '.packages[] | select(.name == $c) | .version')
+            v=$(crate_version "$c")
             if [ "$v" != "$version" ]; then
               echo "::error::$c is version $v, not $version. All five crates share one version."
               exit 1
             fi
           done
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "SHA=$sha" >> "$GITHUB_ENV"
+          {
+            echo "release=true"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
 
       - name: The commit is on main
         if: steps.version.outputs.release == 'true'
@@ -110,8 +126,7 @@ jobs:
       # ntcore and the MSRV build. Wait for that run on this commit and
       # require it to have passed, rather than repeating it here.
       - name: CI passed on this commit
-        # From workflow_run it already has; a pushed tag waits for it.
-        if: steps.version.outputs.release == 'true' && github.event_name == 'push'
+        if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
